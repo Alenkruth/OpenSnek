@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.4.0]
+
+### Added
+- Added contributor-validated Razer Naga V2 Pro support over wired USB, the 2.4 GHz receiver, and Bluetooth, including DPI stages, battery reporting, button remapping, and lighting. The 12-button side panel has its own lighting zone; the 6- and 2-button plates have no lighting. Side-panel labels are physically verified, and the bottom profile-cycle button supports remapping and Default restore. The two top DPI buttons retain their factory bindings.
+- Added contributor-validated Razer Mouse Dock lighting support over USB, including brightness, static color, spectrum, pulse, and animated software presets.
+- Added a configurable Battery Meter software-lighting preset with battery source selection, thresholds, and colors. Accessories can mirror a connected mouse's battery; an unavailable selected source makes the meter go dark, and source status refreshes in the background.
+
+### Changed
+- Lighting-only devices now use one full-width lighting card with a single mode picker and omit mouse-only menu bar controls.
+- Naga Pro side-panel buttons now support Default restore, remapping, and full button-profile reset, including the previously read-only side-panel slots.
+
+### Fixed
+- Fixed menu bar device selection being reverted by the main window, including when opening the window after selecting a device or making rapid selection changes.
+- Fixed menu bar status messages truncating instead of wrapping.
+- Fixed Naga Pro USB button readback showing incorrect bindings for Synapse-configured profiles.
+- Fixed the lighting effect picker reverting to Static while the device continued running an applied effect such as Spectrum.
+- Fixed USB charging indicators on mice that report charging separately from battery level.
+- Fixed incorrect Basilisk V3 X HyperSpeed Bluetooth battery percentages when the raw battery value was 100 or lower.
+
 ## [1.4.0-rc.4]
 
 ### Fixed
