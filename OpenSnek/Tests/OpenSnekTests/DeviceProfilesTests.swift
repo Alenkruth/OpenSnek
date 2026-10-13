@@ -254,12 +254,73 @@ final class DeviceProfilesTests: XCTestCase {
         XCTAssertEqual(profile?.usbLightingZones.map(\.id), ["scroll_wheel", "logo", "underglow"])
     }
 
+    func testResolveBluetoothProfileForBasiliskV3Pro35KPhantomGreen() throws {
+        let baseline = try XCTUnwrap(DeviceProfiles.resolve(vendorID: 0x068E, productID: 0x00AC, transport: .bluetooth))
+        let profile = try XCTUnwrap(DeviceProfiles.resolve(vendorID: 0x068E, productID: 0x00D8, transport: .bluetooth))
+
+        XCTAssertEqual(profile.id, .basiliskV3Pro35K)
+        XCTAssertEqual(profile.productName, "Basilisk V3 Pro 35K Phantom Green Edition")
+        XCTAssertEqual(profile.supportedProducts, [0x00D8])
+        XCTAssertFalse(profile.isLocallyValidated)
+        XCTAssertEqual(profile.passiveDPIInput?.maximumDPI, 35_000)
+        XCTAssertEqual(profile.buttonLayout, baseline.buttonLayout)
+        XCTAssertEqual(profile.supportsAdvancedLightingEffects, baseline.supportsAdvancedLightingEffects)
+        XCTAssertEqual(profile.supportedLightingEffects, baseline.supportedLightingEffects)
+        // No logo LED on the Phantom Green Edition: only the scroll wheel and underglow zones.
+        XCTAssertEqual(profile.usbLightingZones.map(\.id), ["scroll_wheel", "underglow"])
+        XCTAssertEqual(profile.usbLightingLEDIDs, [0x01, 0x0A])
+        XCTAssertEqual(profile.lightingLEDIDs(), [0x01, 0x0A])
+        XCTAssertEqual(baseline.usbLightingLEDIDs, [0x01, 0x04, 0x0A])
+        XCTAssertEqual(profile.passiveDPIInput?.usagePage, baseline.passiveDPIInput?.usagePage)
+        XCTAssertEqual(profile.passiveDPIInput?.usage, baseline.passiveDPIInput?.usage)
+        XCTAssertEqual(profile.passiveDPIInput?.reportID, baseline.passiveDPIInput?.reportID)
+        XCTAssertEqual(profile.passiveDPIInput?.subtype, baseline.passiveDPIInput?.subtype)
+        XCTAssertEqual(profile.passiveDPIInput?.heartbeatSubtype, baseline.passiveDPIInput?.heartbeatSubtype)
+        XCTAssertEqual(profile.passiveDPIInput?.profileSwitchPrefixes, baseline.passiveDPIInput?.profileSwitchPrefixes)
+        XCTAssertEqual(profile.passiveDPIInput?.profileSwitchPreludePrefixes, baseline.passiveDPIInput?.profileSwitchPreludePrefixes)
+        XCTAssertEqual(profile.passiveDPIInput?.maxFeatureReportSize, baseline.passiveDPIInput?.maxFeatureReportSize)
+        XCTAssertEqual(profile.supportsIndependentXYDPI, true)
+        XCTAssertEqual(profile.supportsLightingBrightnessControls, true)
+        // The tested unit rejects `03 84` metadata reads (status 0x03), so Bluetooth profile CRUD stays off.
+        XCTAssertEqual(profile.onboardProfileSupport, .unavailable)
+        XCTAssertFalse(profile.supportsMappedOnboardProfileCRUD)
+        XCTAssertEqual(profile.onboardProfileCount, 1)
+        XCTAssertEqual(baseline.onboardProfileSupport, .mappedCore)
+        XCTAssertEqual(baseline.onboardProfileCount, 5)
+    }
+
+    func testBasiliskV3Pro35KUSBIdentitiesAreNotShippedYet() {
+        // Only the Phantom Green Edition Bluetooth path is hardware validated; its USB IDs (0x00D6/0x00D7)
+        // and the regular 35K's (0x00CC/0x00CD) stay unclaimed until they are validated.
+        for productID in [0x00CC, 0x00CD, 0x00D6, 0x00D7, 0x00D8] { XCTAssertNil(DeviceProfiles.resolve(vendorID: 0x1532, productID: productID, transport: .usb), String(format: "0x%04X", productID)) }
+    }
+
+    func testBasiliskV3Pro35KButtonDefaultsMatchFactoryReadback() {
+        XCTAssertTrue(ButtonBindingSupport.availableButtonBindingKinds(profileID: .basiliskV3Pro35K).contains(.dpiClutch))
+        XCTAssertEqual(ButtonBindingSupport.defaultDPIClutchDPI(for: .basiliskV3Pro35K), 400)
+        // Factory blocks read from all four untouched stored profiles over Bluetooth
+        // (captures/ble/2026-10-13-basilisk-v3-pro-35k/probe-log.txt).
+        XCTAssertEqual(ButtonBindingSupport.defaultUSBFunctionBlock(for: 15, profileID: .basiliskV3Pro35K), [0x06, 0x01, 0x05, 0x01, 0x90, 0x01, 0x90])
+        XCTAssertEqual(ButtonBindingSupport.defaultUSBFunctionBlock(for: 96, profileID: .basiliskV3Pro35K), [0x06, 0x01, 0x06, 0x00, 0x00, 0x00, 0x00])
+        for slot in [1, 2, 3, 4, 5, 9, 10, 52, 53] { XCTAssertEqual(ButtonBindingSupport.defaultUSBFunctionBlock(for: slot, profileID: .basiliskV3Pro35K), ButtonBindingSupport.defaultUSBFunctionBlock(for: slot, profileID: .basiliskV3Pro), "slot \(slot)") }
+    }
+
+    func testBasiliskV3Pro35KFactoryButtonReadbackHydratesAsDefaults() {
+        let factoryBlocks: [Int: [UInt8]] = [15: [0x06, 0x01, 0x05, 0x01, 0x90, 0x01, 0x90], 52: [0x0E, 0x01, 0x68, 0x00, 0x14, 0x00, 0x00], 53: [0x0E, 0x01, 0x69, 0x00, 0x14, 0x00, 0x00], 96: [0x06, 0x01, 0x06, 0x00, 0x00, 0x00, 0x00]]
+        for (slot, block) in factoryBlocks {
+            let draft = ButtonBindingSupport.buttonBindingDraftFromUSBFunctionBlock(slot: slot, functionBlock: block, profileID: .basiliskV3Pro35K)
+            let normalized = draft.map { ButtonBindingSupport.normalizedDefaultRepresentation(for: slot, draft: $0, profileID: .basiliskV3Pro35K) }
+            XCTAssertEqual(normalized?.kind, .default, "slot \(slot)")
+        }
+    }
+
     func testNonHyperspeedBasiliskV3ProfilesShareButtonMapSlots() throws {
         let expectedSlots = DeviceProfiles.basiliskV3FamilyButtonSlots
         let expectedSlotIDs = expectedSlots.map(\.slot)
         let profiles = [
             ("Basilisk V3 USB", DeviceProfiles.resolve(vendorID: 0x1532, productID: 0x0099, transport: .usb)), ("Basilisk V3 Pro USB", DeviceProfiles.resolve(vendorID: 0x1532, productID: 0x00AB, transport: .usb)),
-            ("Basilisk V3 Pro Bluetooth", DeviceProfiles.resolve(vendorID: 0x068E, productID: 0x00AC, transport: .bluetooth)), ("Basilisk V3 35K USB", DeviceProfiles.resolve(vendorID: 0x1532, productID: 0x00CB, transport: .usb))
+            ("Basilisk V3 Pro Bluetooth", DeviceProfiles.resolve(vendorID: 0x068E, productID: 0x00AC, transport: .bluetooth)), ("Basilisk V3 35K USB", DeviceProfiles.resolve(vendorID: 0x1532, productID: 0x00CB, transport: .usb)),
+            ("Basilisk V3 Pro 35K Phantom Green Bluetooth", DeviceProfiles.resolve(vendorID: 0x068E, productID: 0x00D8, transport: .bluetooth))
         ]
 
         for (label, maybeProfile) in profiles {
@@ -403,6 +464,7 @@ final class DeviceProfilesTests: XCTestCase {
         XCTAssertEqual(DeviceProfiles.dpiRange(for: .basiliskV3), 100...26_000)
         XCTAssertEqual(DeviceProfiles.dpiRange(for: .basiliskV3Pro), 100...30_000)
         XCTAssertEqual(DeviceProfiles.dpiRange(for: .basiliskV335K), 100...35_000)
+        XCTAssertEqual(DeviceProfiles.dpiRange(for: .basiliskV3Pro35K), 100...35_000)
         XCTAssertEqual(DeviceProfiles.dpiRange(for: .orochiV2), 100...18_000)
         XCTAssertEqual(DeviceProfiles.dpiRange(for: .nagaPro), 100...20_000)
         XCTAssertEqual(DeviceProfiles.sliderDpiRange(for: .basiliskV3XHyperspeed), 100...18_000)
@@ -478,6 +540,16 @@ final class DeviceProfilesTests: XCTestCase {
         XCTAssertEqual(profile.lightingLEDIDs(), [0x01, 0x04, 0x0A])
     }
 
+    func testBluetoothNameMatcherRanksMoreSpecificBasiliskNamesHigher() throws {
+        XCTAssertEqual(BluetoothNameMatcher.normalized("BSKV3P 35K"), "basilisk v3 pro 35k")
+        XCTAssertEqual(BluetoothNameMatcher.matchRank("BSK V3 PRO", "Basilisk V3 Pro"), Int.max)
+        XCTAssertNil(BluetoothNameMatcher.matchRank("BSK V3 PRO", "Orochi V2"))
+
+        let pro35KRank = try XCTUnwrap(BluetoothNameMatcher.matchRank("BSKV3P 35K", "Basilisk V3 Pro 35K Phantom Green Edition"))
+        let v3ProRank = try XCTUnwrap(BluetoothNameMatcher.matchRank("BSKV3P 35K", "Basilisk V3 Pro"))
+        XCTAssertGreaterThan(pro35KRank, v3ProRank)
+    }
+
     func testResolveBluetoothFallbackProfileByName() {
         let exact = DeviceProfiles.resolveBluetoothFallback(name: "Basilisk V3 X HyperSpeed")
         XCTAssertEqual(exact?.id, .basiliskV3XHyperspeed)
@@ -487,6 +559,15 @@ final class DeviceProfilesTests: XCTestCase {
 
         let shorthand = DeviceProfiles.resolveBluetoothFallback(name: "BSK V3 PRO")
         XCTAssertEqual(shorthand?.id, .basiliskV3Pro)
+
+        let pro35KShorthand = DeviceProfiles.resolveBluetoothFallback(name: "BSKV3P 35K")
+        XCTAssertEqual(pro35KShorthand?.id, .basiliskV3Pro35K)
+
+        let pro35KMarketingName = DeviceProfiles.resolveBluetoothFallback(name: "Razer Basilisk V3 Pro 35K")
+        XCTAssertEqual(pro35KMarketingName?.id, .basiliskV3Pro35K)
+
+        let phantomGreen = DeviceProfiles.resolveBluetoothFallback(name: "Basilisk V3 Pro 35K Phantom Green Edition")
+        XCTAssertEqual(phantomGreen?.id, .basiliskV3Pro35K)
 
         let orochi = DeviceProfiles.resolveBluetoothFallback(name: "Orochi V2")
         XCTAssertEqual(orochi?.id, .orochiV2)

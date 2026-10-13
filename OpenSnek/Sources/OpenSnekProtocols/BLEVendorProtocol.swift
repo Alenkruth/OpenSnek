@@ -409,7 +409,7 @@ public enum BLEVendorProtocol {
             return buildRawFunctionBlockPayload(slot: slot, functionBlock: ButtonBindingSupport.usbFunctionBlockForWrite(slot: Int(slot), draft: draft, profileID: profileID))
         }
         func clutchBytes() -> (UInt8, UInt8) {
-            let clamped = UInt16(DeviceProfiles.clampDPI(clutchDPI ?? ButtonBindingSupport.defaultBasiliskDPIClutchDPI, profileID: .basiliskV3Pro))
+            let clamped = UInt16(DeviceProfiles.clampDPI(clutchDPI ?? ButtonBindingSupport.defaultBasiliskDPIClutchDPI, profileID: profileID ?? .basiliskV3Pro))
             return (UInt8((clamped >> 8) & 0xFF), UInt8(clamped & 0xFF))
         }
         if turboEnabled {

@@ -9,6 +9,7 @@ Target device baseline:
 - Basilisk V3 (`USB PID 0x0099`, OpenRazer-backed USB profile only)
 - Basilisk V3 Pro (`USB PIDs 0x00AA, 0x00AB`)
 - Basilisk V3 Pro Bluetooth (`BT PID 0x00AC`)
+- Basilisk V3 Pro 35K Phantom Green Edition Bluetooth (`BT PID 0x00D8`, contributor validated)
 - Basilisk V3 35K (`USB PID 0x00CB`)
 - Orochi V2 Bluetooth (`BT PID 0x0095`)
 - Naga V2 Pro (`USB PIDs 0x00A7, 0x00A8`, `BT PID 0x00A9`)
@@ -185,6 +186,17 @@ Validated in-session over Bluetooth:
 Validation notes:
 - the required hardware XCTest gate (`OPEN_SNEK_HW=1 swift test --package-path OpenSnek --filter HardwareDpiReliabilityTests`) currently aborts under macOS TCC before CoreBluetooth can start in the unbundled test runner on this host
 - the same five-step DPI stability sequence was rerun successfully through the bundled OpenSnek app/service host, and every step converged for three consecutive reads before restore
+
+## Contributor-Validated BT Profile (Basilisk V3 Pro 35K Phantom Green Edition BT PID `0x00D8`, macOS stack)
+
+Validated on physical hardware by [PLus123456](https://github.com/PLus123456), not by an OpenSnek maintainer:
+- the device resolves to a dedicated profile that reuses the Basilisk V3 Pro Bluetooth vendor keys and button layout with a `35,000` DPI ceiling; the advertised name `BSKV3P 35K` resolves by PID and by name fallback
+- working read/write: live DPI stage table (`0B 84 01 00` / `0B 04 01 00`), with passive HID DPI reports following the DPI button through app-written stages
+- working read: battery raw (`05 81 00 01`, `0x7B`, always on the 0-255 scale), battery status (`05 80 00 01`), sleep timeout (`05 84 00 00`, 300 s)
+- working write/readback: per-zone static color (`10 03 00 <led>` / `10 83 00 <led>`) and brightness (`10 05 01 <led>` / `10 85 01 <led>`) on the two physical zones `0x01` and `0x0A`; this edition has no logo LED even though `10 80 00 01` lists `0x04`
+- acknowledged button writes on slots `0x04` / `0x05` (keyboard, turbo); factory blocks for every Basilisk V3 family slot were read from the unassigned stored banks, and slot `0x0F` uses the compact clutch block `06 01 05 01 90 01 90`
+- not shipped: Bluetooth profile CRUD, because `03 84 <target> 00` metadata reads return status `0x03`; USB (`0x00D6` / `0x00D7` per OpenRazer), because it has not been exercised
+- live Bluetooth writes reset on power cycle; restore-on-connect re-applies saved settings
 
 ## Contributor-Validated BT Profile (Orochi V2 BT PID `0x0095`, macOS stack)
 

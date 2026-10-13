@@ -1,0 +1,34 @@
+Tue Oct 13 20:46:24 +08 2026
+current static color=#ff00ff brightness=51 (0-255)
+
+== snapshot: before
+led=0x01 bright[t0 10 85 00]=33 bright[t1 10 85 01]=33 state[t0 10 83 00]=01 00 00 01 ff 00 ff 00 00 00 state[t1 10 83 01]=01 00 00 01 ff 00 ff 00 00 00
+led=0x04 bright[t0 10 85 00]=00 bright[t1 10 85 01]=00 state[t0 10 83 00]=00 00 00 00 00 00 00 00 00 00 state[t1 10 83 01]=00 00 00 00 00 00 00 00 00 00
+led=0x0a bright[t0 10 85 00]=33 bright[t1 10 85 01]=33 state[t0 10 83 00]=03 00 00 00 00 00 00 00 00 00 state[t1 10 83 01]=03 00 00 00 00 00 00 00 00 00
+
+$ OpenSnekProbe bt-lighting-color --color ff00ff
+write-color zone=scroll_wheel label="Scroll Wheel" led=0x01 key=10 03 00 01 payload=01 00 00 01 ff 00 ff 00 00 00 status=ok
+write-color zone=logo label="Logo" led=0x04 key=10 03 00 04 payload=01 00 00 01 ff 00 ff 00 00 00 status=ok
+write-color zone=underglow label="Underglow" led=0x0a key=10 03 00 0a payload=01 00 00 01 ff 00 ff 00 00 00 status=ok
+lighting zone=scroll_wheel label="Scroll Wheel" led=0x01 brightness=51 color=ff00ff
+lighting zone=logo label="Logo" led=0x04 brightness=0 color=ff00ff
+lighting zone=underglow label="Underglow" led=0x0a brightness=51 color=ff00ff
+
+== snapshot: after color write   <-- look at the mouse light now
+led=0x01 bright[t0 10 85 00]=33 bright[t1 10 85 01]=33 state[t0 10 83 00]=01 00 00 01 ff 00 ff 00 00 00 state[t1 10 83 01]=01 00 00 01 ff 00 ff 00 00 00
+led=0x04 bright[t0 10 85 00]=00 bright[t1 10 85 01]=00 state[t0 10 83 00]=01 00 00 01 ff 00 ff 00 00 00 state[t1 10 83 01]=01 00 00 01 ff 00 ff 00 00 00
+led=0x0a bright[t0 10 85 00]=33 bright[t1 10 85 01]=33 state[t0 10 83 00]=01 00 00 01 ff 00 ff 00 00 00 state[t1 10 83 01]=03 00 00 00 00 00 00 00 00 00
+
+$ OpenSnekProbe bt-lighting-brightness --value 51
+write-brightness zone=scroll_wheel label="Scroll Wheel" led=0x01 key=10 05 01 01 payload=33 status=ok
+write-brightness zone=logo label="Logo" led=0x04 key=10 05 01 04 payload=33 status=ok
+write-brightness zone=underglow label="Underglow" led=0x0a key=10 05 01 0a payload=33 status=ok
+lighting zone=scroll_wheel label="Scroll Wheel" led=0x01 brightness=51 color=ff00ff
+lighting zone=logo label="Logo" led=0x04 brightness=51 color=ff00ff
+lighting zone=underglow label="Underglow" led=0x0a brightness=51 color=ff00ff
+
+== snapshot: after brightness write
+led=0x01 bright[t0 10 85 00]=33 bright[t1 10 85 01]=33 state[t0 10 83 00]=01 00 00 01 ff 00 ff 00 00 00 state[t1 10 83 01]=01 00 00 01 ff 00 ff 00 00 00
+led=0x04 bright[t0 10 85 00]=33 bright[t1 10 85 01]=33 state[t0 10 83 00]=01 00 00 01 ff 00 ff 00 00 00 state[t1 10 83 01]=01 00 00 01 ff 00 ff 00 00 00
+led=0x0a bright[t0 10 85 00]=33 bright[t1 10 85 01]=33 state[t0 10 83 00]=01 00 00 01 ff 00 ff 00 00 00 state[t1 10 83 01]=03 00 00 00 00 00 00 00 00 00
+

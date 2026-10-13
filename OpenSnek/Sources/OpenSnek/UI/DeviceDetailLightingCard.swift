@@ -324,8 +324,11 @@ struct LightingCard: View {
                     HStack(spacing: 12) {
                         Text("Zones").font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(.white.opacity(0.82))
                         Spacer(minLength: 8)
-                        Picker("", selection: Binding(get: { onboardZoneMode }, set: { onboardZoneMode = $0 })) { ForEach(LightingZoneEditMode.allCases) { mode in Text(mode.label).tag(mode) } }.labelsHidden().pickerStyle(.segmented).frame(width: 220).accessibilityIdentifier(
-                            "lighting-zone-mode-picker")
+                        // "All Zones" + "Individual Zones" need ~246pt. A fixed 220pt frame makes AppKit re-grow the
+                        // segmented control on every card redraw (e.g. each brightness-slider tick) before SwiftUI squeezes
+                        // it back, so the segments visibly stretch and snap back. Size to fit, keeping the 220pt column floor.
+                        Picker("", selection: Binding(get: { onboardZoneMode }, set: { onboardZoneMode = $0 })) { ForEach(LightingZoneEditMode.allCases) { mode in Text(mode.label).tag(mode) } }.labelsHidden().pickerStyle(.segmented).fixedSize().frame(minWidth: 220, alignment: .trailing)
+                            .accessibilityIdentifier("lighting-zone-mode-picker")
                     }
                 }
 

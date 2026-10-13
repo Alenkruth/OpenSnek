@@ -1,0 +1,32 @@
+Tue Oct 13 18:21:26 +08 2026
+$ OpenSnekProbe bt-raw-read --key 0b840100 --name BSKV3P 35K --timeout-ms 2500
+bt-raw-read req=0x30 key=0b 84 01 00 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x02 len=36 30 24 00 00 00 00 00 02
+notify[2] len=20 req=0x03 status=0x00 len=5 03 05 01 90 01 90 01 00 00 02 20 03 20 03 00 00 03 dc 05 dc
+notify[3] len=16 req=0x05 status=0x0c len=0 05 00 00 04 80 0c 80 0c 00 00 05 00 19 00 19 00
+payload[36]: 03 05 01 90 01 90 01 00 00 02 20 03 20 03 00 00 03 dc 05 dc 05 00 00 04 80 0c 80 0c 00 00 05 00 19 00 19 00
+[exit=0]
+
+$ OpenSnekProbe bt-raw-read --key 0b840100 --name BSKV3P 35K --timeout-ms 2500
+bt-raw-read req=0x30 key=0b 84 01 00 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x02 len=36 30 24 00 00 00 00 00 02
+notify[2] len=20 req=0x03 status=0x00 len=5 03 05 01 90 01 90 01 00 00 02 20 03 20 03 00 00 03 dc 05 dc
+notify[3] len=16 req=0x05 status=0x0c len=0 05 00 00 04 80 0c 80 0c 00 00 05 00 19 00 19 00
+payload[36]: 03 05 01 90 01 90 01 00 00 02 20 03 20 03 00 00 03 dc 05 dc 05 00 00 04 80 0c 80 0c 00 00 05 00 19 00 19 00
+[exit=0]
+
+$ OpenSnekProbe bt-raw-read --key 0b820000 --name BSKV3P 35K --timeout-ms 1500
+bt-raw-read req=0x30 key=0b 82 00 00 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x02 len=30 30 1e 00 00 00 00 00 02
+notify[2] len=20 req=0x90 status=0x03 len=1 90 01 90 01 00 00 20 03 20 03 00 00 dc 05 dc 05 00 00 80 0c
+notify[3] len=10 req=0x80 status=0x19 len=12 80 0c 00 00 00 19 00 19 00 00
+payload[30]: 90 01 90 01 00 00 20 03 20 03 00 00 dc 05 dc 05 00 00 80 0c 80 0c 00 00 00 19 00 19 00 00
+[exit=0]
+
+$ OpenSnekProbe dpi-read
+active=3 count=5 values=[400, 800, 1500, 3200, 6400]
+[exit=0]
+

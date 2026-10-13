@@ -17,6 +17,33 @@ final class BridgeClientBluetoothFallbackTests: XCTestCase {
         XCTAssertEqual(resolved.charging, false)
     }
 
+    func testResolveBluetoothBatteryStateIgnoresVendorChargingForBasiliskV3Pro35KBluetooth() {
+        let resolved = BridgeClient.resolveBluetoothBatteryState(device: makeBluetoothDevice(productID: 0x00D8, profileID: .basiliskV3Pro35K), vendorRaw: 77, vendorStatus: 1, usbFallback: (12, false))
+
+        XCTAssertEqual(resolved.percent, 30)
+        XCTAssertEqual(resolved.charging, false)
+    }
+
+    func testResolveBluetoothBatteryStateScalesBasiliskV3Pro35KRawOn255Scale() {
+        let device = makeBluetoothDevice(productID: 0x00D8, profileID: .basiliskV3Pro35K)
+        // Captured raw byte 0x7B; values at or below 100 must not be read as a percentage.
+        XCTAssertEqual(BridgeClient.resolveBluetoothBatteryState(device: device, vendorRaw: 0x7B, vendorStatus: 1, usbFallback: nil).percent, 48)
+        XCTAssertEqual(BridgeClient.resolveBluetoothBatteryState(device: device, vendorRaw: 90, vendorStatus: 1, usbFallback: nil).percent, 35)
+        XCTAssertEqual(BridgeClient.resolveBluetoothBatteryState(device: makeBluetoothDevice(productID: 0x00D8, profileID: nil), vendorRaw: 90, vendorStatus: 1, usbFallback: nil).percent, 35)
+        XCTAssertEqual(BridgeClient.resolveBluetoothBatteryState(device: device, vendorRaw: 255, vendorStatus: 1, usbFallback: nil).percent, 100)
+    }
+
+    func testBasiliskV3Pro35KBluetoothUsesZoneStateLighting() async {
+        let client = BridgeClient(startHIDMonitoring: false)
+        let byProfile = await client.usesBluetoothZoneStateLighting(makeBluetoothDevice(productID: 0x00D8, profileID: .basiliskV3Pro35K))
+        let byProductID = await client.usesBluetoothZoneStateLighting(makeBluetoothDevice(productID: 0x00D8, profileID: nil))
+        let v3X = await client.usesBluetoothZoneStateLighting(makeBluetoothDevice(productID: 0x00BA, profileID: .basiliskV3XHyperspeed))
+
+        XCTAssertTrue(byProfile)
+        XCTAssertTrue(byProductID)
+        XCTAssertFalse(v3X)
+    }
+
     func testResolveBluetoothBatteryStateScalesNagaV2ProByteRaw() {
         let resolved = BridgeClient.resolveBluetoothBatteryState(device: makeBluetoothDevice(productID: 0x00A9, profileID: .nagaV2Pro), vendorRaw: 0x45, vendorStatus: 1, usbFallback: nil)
 
@@ -171,6 +198,19 @@ final class BridgeClientBluetoothFallbackTests: XCTestCase {
         XCTAssertEqual(device.product_id, 0x00AC)
         XCTAssertEqual(device.profile_id, .basiliskV3Pro)
         XCTAssertEqual(device.product_name, "BSK V3 PRO")
+        XCTAssertEqual(device.transport, .bluetooth)
+        XCTAssertNotNil(device.button_layout)
+    }
+
+    func testSupportedBluetoothFallbackUsesResolvedProfileForBasiliskV3Pro35KAlias() {
+        let summary = BLEVendorTransportClient.ConnectedPeripheralSummary(name: "BSKV3P 35K", identifier: UUID(uuidString: "88888888-2222-3333-4444-555555555555")!)
+
+        let device = BridgeClient.makeBluetoothFallbackDevice(summary: summary)
+
+        XCTAssertEqual(device.vendor_id, 0x068E)
+        XCTAssertEqual(device.product_id, 0x00D8)
+        XCTAssertEqual(device.profile_id, .basiliskV3Pro35K)
+        XCTAssertEqual(device.product_name, "BSKV3P 35K")
         XCTAssertEqual(device.transport, .bluetooth)
         XCTAssertNotNil(device.button_layout)
     }

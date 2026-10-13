@@ -143,19 +143,24 @@ public final class BLEVendorTransportClient: NSObject, @unchecked Sendable {
         guard let central else { return }
         guard central.state == .poweredOn else { return }
 
-        if isNotifyReady, let peripheral, peripheral.state == .connected, writeChar != nil, notifyChar != nil, peripheralMatchesPreference(peripheral) {
+        let peripherals = central.retrieveConnectedPeripherals(withServices: [CBUUID(nsuuid: BLEVendorProtocol.serviceUUID)])
+        let summaries = peripherals.map { ConnectedPeripheralSummary(name: $0.name, identifier: $0.identifier) }
+        let ready = isNotifyReady && peripheral?.state == .connected && writeChar != nil && notifyChar != nil
+        let selection = Self.connectionSelection(from: summaries, preferredName: preferredPeripheralName, currentIdentifier: peripheral?.identifier, isReady: ready)
+        let selectedIdentifier: UUID
+        switch selection {
+        case .reuse:
             sendNextWriteIfReady()
             return
-        }
-
-        let peripherals = central.retrieveConnectedPeripherals(withServices: [CBUUID(nsuuid: BLEVendorProtocol.serviceUUID)])
-        guard let connected = preferredPeripheral(from: peripherals) else {
+        case .connect(let identifier): selectedIdentifier = identifier
+        case .wait:
             queue.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 guard let self, self.completion != nil else { return }
                 self.ensureConnectedAndReady()
             }
             return
         }
+        guard let connected = peripherals.first(where: { $0.identifier == selectedIdentifier }) else { return }
 
         if peripheral?.identifier != connected.identifier {
             isNotifyReady = false
@@ -167,15 +172,28 @@ public final class BLEVendorTransportClient: NSObject, @unchecked Sendable {
         if connected.state == .connected { connected.discoverServices([CBUUID(nsuuid: BLEVendorProtocol.serviceUUID)]) } else { central.connect(connected) }
     }
 
-    private func preferredPeripheral(from peripherals: [CBPeripheral]) -> CBPeripheral? {
-        guard let preferredPeripheralName, !preferredPeripheralName.isEmpty else { return peripherals.first }
-
-        return peripherals.first(where: { peripheralMatchesPreference($0) }) ?? peripherals.first
+    /// Selects a transport action before any queued command can reuse the cached connection.
+    enum ConnectionSelection: Equatable {
+        case wait
+        case reuse
+        case connect(UUID)
     }
 
-    private func peripheralMatchesPreference(_ peripheral: CBPeripheral) -> Bool {
-        guard let preferredPeripheralName, !preferredPeripheralName.isEmpty else { return true }
-        return BluetoothNameMatcher.looselyMatches(peripheral.name, preferredPeripheralName)
+    static func connectionSelection(from peripherals: [ConnectedPeripheralSummary], preferredName: String?, currentIdentifier: UUID?, isReady: Bool) -> ConnectionSelection {
+        let selected: ConnectedPeripheralSummary?
+        if let preferredName, !preferredName.isEmpty {
+            let preferredProfile = DeviceProfiles.resolveBluetoothFallback(name: preferredName)?.id
+            let ranked = peripherals.compactMap { peripheral -> (ConnectedPeripheralSummary, Int)? in
+                // Related model names overlap, but an absent 35K must never redirect writes to a V3 Pro.
+                if let preferredProfile, let candidateProfile = DeviceProfiles.resolveBluetoothFallback(name: peripheral.name)?.id, preferredProfile != candidateProfile { return nil }
+                return BluetoothNameMatcher.matchRank(peripheral.name, preferredName).map { (peripheral, $0) }
+            }
+            selected = ranked.max(by: { $0.1 < $1.1 })?.0
+        } else {
+            selected = peripherals.first(where: { $0.identifier == currentIdentifier }) ?? peripherals.first
+        }
+        guard let selected else { return .wait }
+        return isReady && selected.identifier == currentIdentifier ? .reuse : .connect(selected.identifier)
     }
 
     private func finish(_ output: Result<[Data], Error>) {

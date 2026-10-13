@@ -34,6 +34,7 @@ public enum DeviceProfileID: String, Codable, Hashable, Sendable {
     case basiliskV3 = "basilisk_v3"
     case basiliskV3Pro = "basilisk_v3_pro"
     case basiliskV335K = "basilisk_v3_35k"
+    case basiliskV3Pro35K = "basilisk_v3_pro_35k"
     case orochiV2 = "orochi_v2"
     case nagaPro = "naga_pro"
     case nagaV2Pro = "naga_v2_pro"
@@ -42,6 +43,19 @@ public enum DeviceProfileID: String, Codable, Hashable, Sendable {
     case huntsmanMini = "huntsman_mini"
     case tartarusPro = "tartarus_pro"
     case mouseDock = "mouse_dock"
+}
+
+/// Groups profile IDs that share Basilisk V3 Pro hardware behavior.
+extension DeviceProfileID {
+    /// The Basilisk V3 Pro 35K shares the Basilisk V3 Pro button layout and Bluetooth vendor keys
+    /// (zone-state lighting, battery, button binds). Per-variant differences such as lighting zones,
+    /// factory button blocks, and onboard-profile support live on the device profile instead.
+    public var isBasiliskV3ProFamily: Bool {
+        switch self {
+        case .basiliskV3Pro, .basiliskV3Pro35K: return true
+        case .basiliskV3XHyperspeed, .basiliskV3, .basiliskV335K, .orochiV2, .nagaPro, .nagaV2Pro, .basilisk, .lanceheadTournamentEdition, .huntsmanMini, .tartarusPro, .mouseDock: return false
+        }
+    }
 }
 
 /// Defines device form factor values.

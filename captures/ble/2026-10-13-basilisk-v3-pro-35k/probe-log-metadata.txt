@@ -1,0 +1,44 @@
+Tue Oct 13 18:41:10 +08 2026
+$ OpenSnekProbe bt-raw-read --key 03800000 --name BSKV3P 35K --timeout-ms 1500
+bt-raw-read req=0x30 key=03 80 00 00 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x02 len=1 30 01 00 00 00 00 00 02
+notify[2] len=1 01
+payload[1]: 01
+[exit=0]
+
+$ OpenSnekProbe bt-raw-write --key 03840100 --payload 00004c00 --name BSKV3P 35K --timeout-ms 2000
+bt-raw-write req=0x30 key=03 84 01 00 payload=00 00 4c 00 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x03 len=0 30 00 00 00 00 00 00 03
+ack status=0x03 payloadLength=0
+[exit=0]
+
+$ OpenSnekProbe bt-raw-write --key 03840100 --payload 4c004c00 --name BSKV3P 35K --timeout-ms 2000
+bt-raw-write req=0x30 key=03 84 01 00 payload=4c 00 4c 00 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x03 len=0 30 00 00 00 00 00 00 03
+ack status=0x03 payloadLength=0
+[exit=0]
+
+$ OpenSnekProbe bt-raw-write --key 03840000 --payload 00004c00 --name BSKV3P 35K --timeout-ms 2000
+bt-raw-write req=0x30 key=03 84 00 00 payload=00 00 4c 00 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x03 len=0 30 00 00 00 00 00 00 03
+ack status=0x03 payloadLength=0
+[exit=0]
+
+$ OpenSnekProbe bt-raw-write --key 03840200 --payload 00004c00 --name BSKV3P 35K --timeout-ms 2000
+bt-raw-write req=0x30 key=03 84 02 00 payload=00 00 4c 00 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x03 len=0 30 00 00 00 00 00 00 03
+ack status=0x03 payloadLength=0
+[exit=0]
+
+$ OpenSnekProbe bt-raw-read --key 03840100 --name BSKV3P 35K --timeout-ms 1500
+bt-raw-read req=0x30 key=03 84 01 00 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x03 len=0 30 00 00 00 00 00 00 03
+payload: nil
+[exit=0]
+
