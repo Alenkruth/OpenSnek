@@ -118,13 +118,13 @@ enum SoftwareUpdateInstallState: Equatable {
 }
 
 /// Defines software update installer behavior.
-@MainActor protocol SoftwareUpdateInstalling: AnyObject { func installLatestRelease(statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) throws }
+@MainActor protocol SoftwareUpdateInstalling: AnyObject { func installLatestRelease(statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws }
 
 /// Provides a disabled software update installer fallback.
 @MainActor final class DisabledSoftwareUpdateInstaller: SoftwareUpdateInstalling {
     static let shared = DisabledSoftwareUpdateInstaller()
 
-    func installLatestRelease(statusHandler _: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) throws { throw NSError(domain: "OpenSnek.Update", code: 1, userInfo: [NSLocalizedDescriptionKey: "Automatic update installation is not configured for this build."]) }
+    func installLatestRelease(statusHandler _: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws { throw NSError(domain: "OpenSnek.Update", code: 1, userInfo: [NSLocalizedDescriptionKey: "Automatic update installation is not configured for this build."]) }
 }
 
 /// Stores release update checker data.

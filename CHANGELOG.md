@@ -8,6 +8,7 @@ All notable changes to this project are documented in this file.
 - Added contributor-validated Bluetooth support for the Razer Basilisk V3 Pro 35K Phantom Green Edition (`0x00D8`): DPI stages up to 35,000, battery, sleep timeout, button remapping, and static lighting on its two zones (scroll wheel and underglow; this edition has no logo LED). Onboard profile management stays hidden because the mouse rejects profile metadata reads, and Bluetooth changes reset when the mouse powers off, so use a local profile with restore-on-connect to keep them. Bluetooth commands follow device selection when both a V3 Pro and a 35K are connected, and wait for the selected model if it disconnects.
 
 ### Fixed
+- Fixed in-app updates installing successfully without relaunching OpenSnek when a background service was already running. Updates now wait for other OpenSnek processes to exit before starting Sparkle, and reconnect the service if the update is canceled or fails.
 - Fixed the lighting Zones picker ("All Zones" / "Individual Zones") stretching and snapping back while dragging the brightness slider or during other lighting card updates.
 
 ## [1.4.0]

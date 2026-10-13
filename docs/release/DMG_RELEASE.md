@@ -185,3 +185,30 @@ xcrun stapler validate "OpenSnek/.release/export/OpenSnek.app"
 xcrun stapler validate "OpenSnek/.release/artifacts/OpenSnek-<version>.dmg"
 unzip -l "OpenSnek/.release/artifacts/OpenSnek-<version>.zip" | grep 'OpenSnek.app/Contents/Info.plist'
 ```
+
+### Relaunch regression validation
+
+Sparkle 2.9.3 monitors the first running process matching the application bundle.
+OpenSnek's service and UI use the same bundle, so an update session must stop and
+wait for all other instances **before** starting Sparkle. Stopping the service in
+`willInstallUpdate` is too late: its exit can finish installation before Sparkle
+receives the relaunch request. Keep service launches suspended through the relaunch
+callback; a successful cycle callback during shutdown must not restart the service.
+
+Validate a signed update (or a dev-signed dry-run update) locally:
+
+1. Enable the menu bar service, close the main window, then reopen it. This leaves
+   the service older than the UI, matching the production failure.
+2. Start an update. Confirm the `Update` log reports that other processes exited
+   before Sparkle starts. Install and restart; verify the new version opens a main
+   window and starts exactly one service, with device telemetry working again.
+3. Repeat with the service disabled and with an extra UI instance running.
+4. Cancel at the update prompt and during download, and exercise a download failure.
+   Verify the main window reconnects to live telemetry, the menu bar returns when
+   enabled, preferences remain unchanged, and a second update attempt works.
+5. If another instance refuses to exit, verify preparation times out visibly and
+   does not start Sparkle or replace the app.
+
+Unit coverage simulates delayed service/UI exits, timeout, preparation cancellation,
+repeated attempts, and completion/abort ordering around relaunch. A real signed
+install/relaunch remains a manual gate; unit tests do not replace the production app.
