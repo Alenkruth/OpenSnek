@@ -15,13 +15,17 @@ import OpenSnekAppSupport
         super.init()
     }
 
-    func installLatestRelease(statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) throws {
+    func installLatestRelease(statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws {
         guard Self.isConfigured() else { throw NSError(domain: "OpenSnek.Update", code: 1, userInfo: [NSLocalizedDescriptionKey: "Automatic update installation is not configured for this build."]) }
 
-        let updaterController = makeUpdaterControllerIfNeeded(statusHandler: statusHandler)
-        updaterDelegate?.statusHandler = statusHandler
+        guard !OpenSnekProcessRole.current.isService else { throw NSError(domain: "OpenSnek.Update", code: 2, userInfo: [NSLocalizedDescriptionKey: "Open the OpenSnek window to install updates."]) }
         statusHandler(.checking)
-        updaterController.checkForUpdates(nil)
+        let processes = SoftwareUpdateSession.Processes(otherRunningPIDs: { self.serviceCoordinator.otherRunningApplicationPIDs }, terminateOthers: { self.serviceCoordinator.terminateOtherRunningApplicationInstances() })
+        try await serviceCoordinator.softwareUpdateSession.run(processes: processes) {
+            let updaterController = self.makeUpdaterControllerIfNeeded(statusHandler: statusHandler)
+            self.updaterDelegate?.statusHandler = statusHandler
+            updaterController.checkForUpdates(nil)
+        }
     }
 
     private static func isConfigured(bundle: Bundle = .main) -> Bool {
@@ -72,19 +76,18 @@ import OpenSnekAppSupport
     func updater(_: SPUUpdater, userDidMake choice: SPUUserUpdateChoice, forUpdate _: SUAppcastItem, state _: SPUUserUpdateState) { if choice == .install { statusHandler(.installing) } }
 
     func updater(_: SPUUpdater, willInstallUpdate _: SUAppcastItem) {
-        serviceCoordinator.stopServiceProcess()
-        serviceCoordinator.terminateOtherRunningApplicationInstances()
+        AppLog.info("Update", "Sparkle will install update")
         statusHandler(.installing)
     }
 
-    func updaterWillRelaunchApplication(_: SPUUpdater) {
-        serviceCoordinator.stopServiceProcess()
-        serviceCoordinator.terminateOtherRunningApplicationInstances()
+    func updaterWillRelaunchApplication(_: SPUUpdater) { serviceCoordinator.softwareUpdateSession.willRelaunch() }
+
+    func updater(_: SPUUpdater, didAbortWithError error: any Error) {
+        statusHandler(.failed(error.localizedDescription))
+        serviceCoordinator.softwareUpdateSession.finish(error: error)
     }
 
-    func updater(_: SPUUpdater, didAbortWithError error: any Error) { statusHandler(.failed(error.localizedDescription)) }
-
-    func updater(_: SPUUpdater, didFinishUpdateCycleFor _: SPUUpdateCheck, error: (any Error)?) { if let error { statusHandler(.failed(error.localizedDescription)) } else { statusHandler(.idle) } }
+    func updater(_: SPUUpdater, didFinishUpdateCycleFor _: SPUUpdateCheck, error: (any Error)?) { serviceCoordinator.softwareUpdateSession.finish(error: error) }
 
     private static var shouldForceLatestUpdateForDryRun: Bool { ReleaseUpdateChecker.currentBuildChannel() == .dev && DeveloperRuntimeOptions.releaseUpdateDryRunEnabled() }
 }

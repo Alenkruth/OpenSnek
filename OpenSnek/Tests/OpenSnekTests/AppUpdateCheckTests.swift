@@ -48,7 +48,7 @@ final class AppUpdateCheckTests: XCTestCase {
 
         await appState.runtimeController.installAvailableUpdate()
 
-        XCTAssertEqual(appState.deviceStore.updateInstallState, .checking)
+        XCTAssertEqual(appState.deviceStore.updateInstallState, .idle)
         XCTAssertEqual(installer.installCallCount, 1)
     }
 
@@ -57,9 +57,16 @@ final class AppUpdateCheckTests: XCTestCase {
         let appState = AppState(launchRole: .app, backend: BootstrapPendingBackend.shared, softwareUpdateInstaller: installer, autoStart: false)
         appState.deviceStore.availableUpdate = ReleaseAvailability(latestVersion: "1.2.3", releaseURL: URL(string: "https://github.com/gh123man/OpenSnek/releases/tag/v1.2.3")!, checkMode: .newerThanCurrent)
 
+        installer.operation = {
+            XCTAssertEqual(appState.deviceStore.updateInstallState, .downloading(received: 10, expected: 100))
+            XCTAssertTrue(appState.runtimeController.isInstallingUpdate)
+            await appState.runtimeController.installAvailableUpdate()
+            XCTAssertEqual(installer.installCallCount, 1, "Repeated clicks must not start another update")
+        }
         await appState.runtimeController.installAvailableUpdate()
 
-        XCTAssertEqual(appState.deviceStore.updateInstallState, .downloading(received: 10, expected: 100))
+        XCTAssertEqual(appState.deviceStore.updateInstallState, .idle)
+        XCTAssertFalse(appState.runtimeController.isInstallingUpdate)
         XCTAssertEqual(installer.installCallCount, 1)
     }
 }
@@ -86,11 +93,13 @@ private actor MockReleaseUpdateChecker: ReleaseUpdateChecking {
 @MainActor private final class MockSoftwareUpdateInstaller: SoftwareUpdateInstalling {
     private let statuses: [SoftwareUpdateInstallState]
     private(set) var installCallCount = 0
+    var operation: @MainActor () async -> Void = {}
 
     init(statuses: [SoftwareUpdateInstallState] = []) { self.statuses = statuses }
 
-    func installLatestRelease(statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) throws {
+    func installLatestRelease(statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws {
         installCallCount += 1
         for status in statuses { statusHandler(status) }
+        await operation()
     }
 }

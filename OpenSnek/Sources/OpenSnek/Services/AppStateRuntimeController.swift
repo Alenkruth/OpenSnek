@@ -27,6 +27,7 @@ import OpenSnekCore
     private var lastFastDpiPollAt: Date = .distantPast
     private var transientStatusUntil: Date?
     private(set) var isBackendReady = false
+    private(set) var isInstallingUpdate = false
     private var backendStateUpdatesBootstrapTask: Task<Void, Never>?
     private var backendStateUpdatesTask: Task<Void, Never>?
     private var remoteClientPresenceByProcessID: [Int32: RemoteClientPresenceState] = [:]
@@ -438,6 +439,7 @@ import OpenSnekCore
     }
 
     func setBackgroundServiceEnabled(_ enabled: Bool) async {
+        guard !isInstallingUpdate else { return }
         runtimeStore.backgroundServiceEnabled = enabled
         environment.serviceCoordinator.setBackgroundServiceEnabled(enabled)
         if !enabled, runtimeStore.launchAtStartupEnabled { setLaunchAtStartupEnabled(false) }
@@ -613,11 +615,21 @@ import OpenSnekCore
     }
 
     func installAvailableUpdate() async {
-        guard deviceStore.availableUpdate != nil else { return }
+        guard deviceStore.availableUpdate != nil, !isInstallingUpdate else { return }
+        isInstallingUpdate = true
+        defer { isInstallingUpdate = false }
+        let shouldReconnectService = environment.usesRemoteServiceTransport
         do {
             deviceStore.updateInstallState = .checking
-            try environment.softwareUpdateInstaller.installLatestRelease { [weak self] state in self?.deviceStore.updateInstallState = state }
+            try await environment.softwareUpdateInstaller.installLatestRelease { [weak self] state in self?.deviceStore.updateInstallState = state }
+            deviceStore.updateInstallState = .idle
         } catch { deviceStore.updateInstallState = .failed(error.localizedDescription) }
+        if shouldReconnectService {
+            // A canceled or failed update may have stopped the service. Rebuild the
+            // backend and subscription using the newly published endpoint.
+            await configureBackendForCurrentPreferences()
+            await bootstrapRemoteStateIfNeeded(force: true)
+        }
     }
 
     private static func usesReleaseUpdateDryRun() -> Bool { ReleaseUpdateChecker.currentBuildChannel() == .dev && DeveloperRuntimeOptions.releaseUpdateDryRunEnabled() }
@@ -639,6 +651,7 @@ import OpenSnekCore
     }
 
     func pollRuntimeOnce(now: Date = Date()) async {
+        guard !isInstallingUpdate else { return }
         guard !isTearingDown else { return }
         guard powerState == .active else { return }
         let profile = pollingProfile(at: now)

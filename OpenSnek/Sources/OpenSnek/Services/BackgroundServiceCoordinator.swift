@@ -7,6 +7,8 @@ import Network
 @MainActor final class BackgroundServiceCoordinator {
     static let shared = BackgroundServiceCoordinator()
 
+    let softwareUpdateSession = SoftwareUpdateSession()
+
     nonisolated static let backgroundServiceEnabledDefaultsKey = "backgroundServiceEnabled"
     nonisolated static let launchAtStartupDefaultsKey = "launchServiceAtStartup"
     nonisolated static let launchAtStartupDidChangeNotification = Notification.Name("io.opensnek.OpenSnek.launchAtStartupDidChange")
@@ -141,6 +143,7 @@ import Network
     }
 
     func launchServiceProcess() throws {
+        guard !softwareUpdateSession.isActive else { throw SoftwareUpdateSession.PreparationError.alreadyUpdating }
         guard !isCurrentProcessService else { return }
         if isServiceProcessAlive { return }
 
@@ -173,6 +176,11 @@ import Network
         process.arguments = arguments
         process.currentDirectoryURL = Bundle.main.bundleURL.deletingLastPathComponent()
         do { try process.run() } catch { AppLog.error("Service", "launchFullAppProcess failed: \(error.localizedDescription)") }
+    }
+
+    var otherRunningApplicationPIDs: [Int32] {
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier else { return [] }
+        return NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && !$0.isTerminated }.map(\.processIdentifier)
     }
 
     func terminateOtherRunningApplicationInstances() {

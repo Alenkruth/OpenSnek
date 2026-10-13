@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Fixed in-app updates installing successfully without relaunching OpenSnek when a background service was already running. Updates now wait for other OpenSnek processes to exit before starting Sparkle, and reconnect the service if the update is canceled or fails.
+
 ## [1.4.0]
 
 ### Added
