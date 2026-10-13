@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+- Added contributor-validated Bluetooth support for the Razer Basilisk V3 Pro 35K Phantom Green Edition (`0x00D8`): DPI stages up to 35,000, battery, sleep timeout, button remapping, and static lighting on its two zones (scroll wheel and underglow; this edition has no logo LED). Onboard profile management stays hidden because the mouse rejects profile metadata reads, and Bluetooth changes reset when the mouse powers off, so use a local profile with restore-on-connect to keep them. Bluetooth commands follow device selection when both a V3 Pro and a 35K are connected, and wait for the selected model if it disconnects.
+
 ## [1.4.0]
 
 ### Added

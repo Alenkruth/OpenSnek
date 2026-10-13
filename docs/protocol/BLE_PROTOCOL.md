@@ -17,6 +17,7 @@ Source-of-truth rule:
 Supported device baseline:
 - Basilisk V3 X HyperSpeed Bluetooth (`VID=0x068E`, `PID=0x00BA`)
 - Basilisk V3 Pro Bluetooth (`VID=0x068E`, `PID=0x00AC`)
+- Basilisk V3 Pro 35K Phantom Green Edition Bluetooth (`VID=0x068E`, `PID=0x00D8`, contributor validated)
 
 Document goal:
 - A new reader should be able to build a client that implements the current OpenSnek Bluetooth feature set from scratch:
@@ -602,6 +603,15 @@ Contributor-validated Naga V2 Pro Bluetooth (vendor `0x068E`, PID `0x00A9`):
 - stored-bank writes accept the 10-byte `01 <slot> 00 <block>` payload form and restore byte-for-byte (validated on target 3, slot `0x40`)
 - see `captures/ble/2026-10-07-naga-v2-pro-buttons/`
 
+Contributor-validated Basilisk V3 Pro 35K Phantom Green Edition Bluetooth (vendor `0x068E`, PID `0x00D8`, advertised as `BSKV3P 35K`):
+- the device uses the Basilisk V3 Pro Bluetooth key catalog and 8-byte notify header; each fresh connection first emits an unsolicited `01 00 00 00 00 00 00 03` notify that request-ID matching ignores
+- metadata reads `03 84 <target> 00` return status `0x03` on targets `0`, `1`, and `2` (with or without the `offset,length` read request), so the mapped profile CRUD transaction is unavailable and OpenSnek edits through the live keys (`0B 04 01 00`, `08 04 01 <slot>`, `10 03 00 <led>`, `10 05 01 <led>`)
+- untouched stored banks return the compact clutch block `06 01 05 01 90 01 90` for slot `0x0F` (the Basilisk V3 Pro reads `06 05 05 01 90 01 90`) and the short wheel-tilt blocks `0e 01 68/69 00 14 00 00`
+- peripheral selection runs before reusing a ready connection; overlapping V3 Pro/35K names cannot reuse the other model, and an absent requested model waits for reconnection instead of falling back to another mouse
+- the zone list `10 80 00 01` still returns `04 01 0a`, but this edition has no logo LED; OpenSnek only drives `0x01` (scroll wheel) and `0x0A` (underglow)
+- live writes do not persist: after a power cycle the device restores its own lighting effect, brightness, and DPI table
+- see `captures/ble/2026-10-13-basilisk-v3-pro-35k/`
+
 #### 6.5.2 Mouse Button IDs Used by Swift
 
 | Meaning | Button ID |
@@ -956,7 +966,8 @@ Current Swift interpretation:
   - if `<= 100`, treat as direct percentage
   - else scale `0...255` to `0...100`
   - exception: on Basilisk V3 X HyperSpeed Bluetooth (`0x00BA`), always scale `0...255` to `0...100`, because that device reports values at or below 100 on the same `0...255` scale (observed raw `0x52` = 82 while the standard BLE Battery Service `0x2A19` and macOS reported 32%)
-- on Basilisk V3 Pro Bluetooth (`0x00AC`), OpenSnek currently ignores `batteryStatus` for charging UI because the status bit does not reliably mean `charging`; charging only comes from an available USB fallback session
+  - exception: on Basilisk V3 Pro 35K Phantom Green Edition Bluetooth (`0x00D8`), always scale `0...255` to `0...100`; the device reported raw `0x7B`, so values at or below 100 are on the same scale
+- on Basilisk V3 Pro Bluetooth (`0x00AC`) and the Basilisk V3 Pro 35K Phantom Green Edition (`0x00D8`), OpenSnek currently ignores `batteryStatus` for charging UI because the status bit does not reliably mean `charging`; charging only comes from an available USB fallback session
 - on Basilisk V3 X HyperSpeed Bluetooth (`0x00BA`), OpenSnek ignores `batteryStatus` for charging UI and reports `not charging` because that device is AA-powered
 
 Those semantics are client policy inferred from observed behavior, not a fully decoded vendor spec.

@@ -13,7 +13,13 @@ extension BridgeClient {
 
     /// Whether this Bluetooth device uses the per-zone state lighting surface (`10 83`/`10 03`
     /// color, `10 85`/`10 05` brightness) instead of the legacy single-frame lighting keys.
-    func usesBluetoothZoneStateLighting(_ device: MouseDevice) -> Bool { device.transport == .bluetooth && (device.profile_id == .basiliskV3Pro || device.product_id == 0x00AC || device.profile_id == .nagaV2Pro || device.product_id == 0x00A9) }
+    func usesBluetoothZoneStateLighting(_ device: MouseDevice) -> Bool { device.transport == .bluetooth && (Self.isBasiliskV3ProFamilyBluetooth(device) || device.profile_id == .nagaV2Pro || device.product_id == 0x00A9) }
+
+    nonisolated static func isBasiliskV3ProFamilyBluetooth(_ device: MouseDevice) -> Bool {
+        guard device.transport == .bluetooth else { return false }
+        if device.profile_id?.isBasiliskV3ProFamily == true { return true }
+        return DeviceProfiles.resolve(vendorID: device.vendor_id, productID: device.product_id, transport: device.transport)?.id.isBasiliskV3ProFamily == true
+    }
 
     func bluetoothLightingLEDIDs(device: MouseDevice, override: [UInt8]? = nil) -> [UInt8] {
         let profileLEDIDs = DeviceProfiles.resolve(vendorID: device.vendor_id, productID: device.product_id, transport: device.transport)?.lightingLEDIDs()
@@ -38,16 +44,18 @@ extension BridgeClient {
         // conversion and the Naga V2 Pro's USB-compatible truncation.
         let isV3XBluetooth = device.transport == .bluetooth && (device.profile_id == .basiliskV3XHyperspeed || device.product_id == 0x00BA)
         let isNagaV2Bluetooth = device.transport == .bluetooth && (device.profile_id == .nagaV2Pro || device.product_id == 0x00A9)
+        // The V3 Pro 35K reported raw 0x7B over Bluetooth, so its byte is on the 0-255 scale even below 100.
+        let isV3Pro35KBluetooth = device.transport == .bluetooth && (device.profile_id == .basiliskV3Pro35K || device.product_id == 0x00D8)
         let vendorPercent = vendorRaw.map { raw in
             if isV3XBluetooth { return Int((Double(min(max(raw, 0), 255)) / 255.0 * 100.0).rounded()) }
-            return (isNagaV2Bluetooth || raw > 100) ? Int((Double(raw) / 255.0) * 100.0) : raw
+            return (isNagaV2Bluetooth || isV3Pro35KBluetooth || raw > 100) ? Int((Double(raw) / 255.0) * 100.0) : raw
         }
         let charging: Bool?
         if device.transport == .bluetooth, device.profile_id == .basiliskV3XHyperspeed || device.product_id == 0x00BA {
             charging = false
         } else if device.transport == .bluetooth, device.profile_id == .orochiV2 || device.product_id == 0x0095 {
             charging = false
-        } else if device.transport == .bluetooth, device.profile_id == .basiliskV3Pro || device.product_id == 0x00AC {
+        } else if isBasiliskV3ProFamilyBluetooth(device) {
             charging = usbFallback?.1
         } else if device.transport == .bluetooth, device.profile_id == .nagaV2Pro || device.product_id == 0x00A9 {
             // The vendor status bit is unreliable on this family; only trust a USB fallback session.

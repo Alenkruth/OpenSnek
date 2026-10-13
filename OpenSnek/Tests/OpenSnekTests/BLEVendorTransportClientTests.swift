@@ -2,8 +2,39 @@ import Foundation
 import XCTest
 @testable import OpenSnekHardware
 
-/// Exercises BLE vendor transport completion timing.
+/// Exercises BLE vendor transport routing and completion timing.
 final class BLEVendorTransportClientTests: XCTestCase {
+    func testReadyConnectionSwitchesBetweenBasiliskModelsInBothDirections() {
+        let pro = BLEVendorTransportClient.ConnectedPeripheralSummary(name: "BSK V3 PRO", identifier: UUID())
+        let pro35K = BLEVendorTransportClient.ConnectedPeripheralSummary(name: "BSKV3P 35K", identifier: UUID())
+        for devices in [[pro, pro35K], [pro35K, pro]] {
+            XCTAssertEqual(BLEVendorTransportClient.connectionSelection(from: devices, preferredName: pro35K.name, currentIdentifier: pro.identifier, isReady: true), .connect(pro35K.identifier))
+            XCTAssertEqual(BLEVendorTransportClient.connectionSelection(from: devices, preferredName: pro.name, currentIdentifier: pro35K.identifier, isReady: true), .connect(pro.identifier))
+            XCTAssertEqual(BLEVendorTransportClient.connectionSelection(from: devices, preferredName: pro35K.name, currentIdentifier: pro35K.identifier, isReady: true), .reuse)
+        }
+    }
+
+    func testMissingSelectedBasiliskWaitsAndReconnectsWithoutUsingOtherMouse() {
+        let pro = BLEVendorTransportClient.ConnectedPeripheralSummary(name: "BSK V3 PRO", identifier: UUID())
+        let pro35K = BLEVendorTransportClient.ConnectedPeripheralSummary(name: "BSKV3P 35K", identifier: UUID())
+        for (selected, other) in [(pro, pro35K), (pro35K, pro)] {
+            XCTAssertEqual(BLEVendorTransportClient.connectionSelection(from: [other], preferredName: selected.name, currentIdentifier: other.identifier, isReady: true), .wait)
+            XCTAssertEqual(BLEVendorTransportClient.connectionSelection(from: [], preferredName: selected.name, currentIdentifier: selected.identifier, isReady: true), .wait)
+            XCTAssertEqual(BLEVendorTransportClient.connectionSelection(from: [other, selected], preferredName: selected.name, currentIdentifier: other.identifier, isReady: true), .connect(selected.identifier))
+            XCTAssertEqual(BLEVendorTransportClient.connectionSelection(from: [selected], preferredName: selected.name, currentIdentifier: selected.identifier, isReady: false), .connect(selected.identifier))
+        }
+    }
+
+    func testPeripheralSelectionSupportsMarketingNamesAndUnnamedRequests() {
+        let pro35K = BLEVendorTransportClient.ConnectedPeripheralSummary(name: "BSKV3P 35K", identifier: UUID())
+        let pro = BLEVendorTransportClient.ConnectedPeripheralSummary(name: "BSK V3 PRO", identifier: UUID())
+        let devices = [pro, pro35K]
+        XCTAssertEqual(BLEVendorTransportClient.connectionSelection(from: devices, preferredName: "Razer Basilisk V3 Pro 35K Phantom Green Edition", currentIdentifier: pro.identifier, isReady: true), .connect(pro35K.identifier))
+        XCTAssertEqual(BLEVendorTransportClient.connectionSelection(from: devices, preferredName: "Orochi V2", currentIdentifier: pro.identifier, isReady: true), .wait)
+        XCTAssertEqual(BLEVendorTransportClient.connectionSelection(from: devices, preferredName: nil, currentIdentifier: pro35K.identifier, isReady: true), .reuse)
+        XCTAssertEqual(BLEVendorTransportClient.connectionSelection(from: devices, preferredName: nil, currentIdentifier: nil, isReady: false), .connect(pro.identifier))
+    }
+
     func testResponseIdleTimerCompletesOnlyAfterLatestActivityDeadline() throws {
         let scheduler = WorkItemRecorder()
         let completions = LockedCounter()

@@ -343,6 +343,14 @@ final class BLEVendorProtocolTests: XCTestCase {
         XCTAssertEqual(Array(payload), [0x01, 0x0F, 0x00, 0x06, 0x05, 0x05, 0x03, 0x20, 0x03, 0x20])
     }
 
+    func testButtonPayloadDPIClutchClampsToProfileMaximumDPI() {
+        let v3Pro = BLEVendorProtocol.buildButtonPayload(slot: 0x0F, kind: .dpiClutch, hidKey: nil, clutchDPI: 32_000, profileID: .basiliskV3Pro)
+        let v3Pro35K = BLEVendorProtocol.buildButtonPayload(slot: 0x0F, kind: .dpiClutch, hidKey: nil, clutchDPI: 32_000, profileID: .basiliskV3Pro35K)
+
+        XCTAssertEqual(Array(v3Pro), [0x01, 0x0F, 0x00, 0x06, 0x05, 0x05, 0x75, 0x30, 0x75, 0x30])
+        XCTAssertEqual(Array(v3Pro35K), [0x01, 0x0F, 0x00, 0x06, 0x05, 0x05, 0x7D, 0x00, 0x7D, 0x00])
+    }
+
     func testButtonPayloadDPIClutchRetargetsToStoredProfile() {
         let livePayload = BLEVendorProtocol.buildButtonPayload(slot: 0x0F, kind: .dpiClutch, hidKey: nil, clutchDPI: 800)
         let storedPayload = BLEVendorProtocol.retargetButtonPayload(livePayload, target: 0x04, slot: 0x0F)

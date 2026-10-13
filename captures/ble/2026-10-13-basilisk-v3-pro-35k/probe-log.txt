@@ -1,0 +1,187 @@
+Tue Oct 13 18:17:22 +08 2026
+$ OpenSnekProbe bt-info
+bt connected-peripherals: none
+[exit=0]
+
+$ OpenSnekProbe dpi-read
+error: BT vendor timeout
+[exit=0]
+
+$ OpenSnekProbe bt-raw-read --key 05810001 --name BSKV3P 35K
+bt-raw-read req=0x30 key=05 81 00 01 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x02 len=1 30 01 00 00 00 00 00 02
+notify[2] len=1 7b
+payload[1]: 7b
+[exit=0]
+
+$ OpenSnekProbe bt-raw-read --key 05800001 --name BSKV3P 35K
+bt-raw-read req=0x30 key=05 80 00 01 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x02 len=1 30 01 00 00 00 00 00 02
+notify[2] len=1 01
+payload[1]: 01
+[exit=0]
+
+$ OpenSnekProbe bt-raw-read --key 05840000 --name BSKV3P 35K
+bt-raw-read req=0x30 key=05 84 00 00 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x02 len=2 30 02 00 00 00 00 00 02
+notify[2] len=2 2c 01
+payload[2]: 2c 01
+[exit=0]
+
+$ OpenSnekProbe bt-raw-read --key 10800001 --name BSKV3P 35K
+bt-raw-read req=0x30 key=10 80 00 01 name="BSKV3P 35K"
+notify[0] len=8 req=0x01 status=0x03 len=0 01 00 00 00 00 00 00 03
+notify[1] len=8 req=0x30 status=0x02 len=3 30 03 00 00 00 00 00 02
+notify[2] len=3 04 01 0a
+payload[3]: 04 01 0a
+[exit=0]
+
+$ OpenSnekProbe bt-lighting-info --name BSKV3P 35K
+bt profile="Basilisk V3 Pro 35K" name="BSKV3P 35K"
+supported-led-ids=0x04,0x01,0x0a
+zone id=scroll_wheel label="Scroll Wheel" ledIDs=[0x01]
+zone id=logo label="Logo" ledIDs=[0x04]
+zone id=underglow label="Underglow" ledIDs=[0x0a]
+lighting zone=scroll_wheel label="Scroll Wheel" led=0x01 brightness=51 color=read_failed
+lighting zone=logo label="Logo" led=0x04 brightness=0 color=read_failed
+lighting zone=underglow label="Underglow" led=0x0a brightness=51 color=read_failed
+[exit=0]
+
+$ OpenSnekProbe bt-profile-read --button-slots 1,2,3,4,5,9,10,14,15,52,53,96,106 --name BSKV3P 35K
+bt-profile-read name="BSKV3P 35K" targets=2,3,4,5 buttonSlots=1,2,3,4,5,9,10,14,15,52,53,96,106
+inventory key=03 80 00 00 payload=01
+active-target key=03 82 00 00 payload=01 target=live-projection(target=1)
+target hardware-active(target=0) scalar=1500x1500 stages=[400x400,800x800,1500x1500,3200x3200,6400x6400] token=0x03 rawScalar=dc 05 dc 05 00 00 rawStages=90 01 90 01 00 00 20 03 20 03 00 00 dc 05 dc 05 00 00 80 0c 80 0c 00 00 00 19 00 19 00 00 rawToken=03
+target stored-slot=1(target=2) scalar=1600x1600 stages=[400x400,800x800,1600x1600,3200x3200,6400x6400] token=0x03 rawScalar=40 06 40 06 00 00 rawStages=90 01 90 01 90 01 20 03 20 03 20 03 40 06 40 06 40 06 80 0c 80 0c 80 0c 00 19 00 19 00 19 rawToken=03
+target stored-slot=2(target=3) scalar=1600x1600 stages=[400x400,800x800,1600x1600,3200x3200,6400x6400] token=0x03 rawScalar=40 06 40 06 00 00 rawStages=90 01 90 01 90 01 20 03 20 03 20 03 40 06 40 06 40 06 80 0c 80 0c 80 0c 00 19 00 19 00 19 rawToken=03
+target stored-slot=3(target=4) scalar=1600x1600 stages=[400x400,800x800,1600x1600,3200x3200,6400x6400] token=0x03 rawScalar=40 06 40 06 00 00 rawStages=90 01 90 01 90 01 20 03 20 03 20 03 40 06 40 06 40 06 80 0c 80 0c 80 0c 00 19 00 19 00 19 rawToken=03
+target stored-slot=4(target=5) scalar=1600x1600 stages=[400x400,800x800,1600x1600,3200x3200,6400x6400] token=0x03 rawScalar=40 06 40 06 00 00 rawStages=90 01 90 01 90 01 20 03 20 03 20 03 40 06 40 06 40 06 80 0c 80 0c 80 0c 00 19 00 19 00 19 rawToken=03
+fingerprint active=[400x400,800x800,1500x1500,3200x3200,6400x6400] match=none
+lighting-leds ids=0x04,0x01,0x0a
+lighting hardware-active(target=0) led=0x04 brightness=0 rawBrightness=00 color=unparsed rawState=00 00 00 00 00 00 00 00 00 00
+lighting hardware-active(target=0) led=0x01 brightness=12 rawBrightness=0c color=unparsed rawState=03 00 00 00 00 00 00 00 00 00
+lighting hardware-active(target=0) led=0x0a brightness=12 rawBrightness=0c color=unparsed rawState=03 00 00 00 00 00 00 00 00 00
+lighting live-projection(target=1) led=0x04 brightness=0 rawBrightness=00 color=unparsed rawState=00 00 00 00 00 00 00 00 00 00
+lighting live-projection(target=1) led=0x01 brightness=51 rawBrightness=33 color=unparsed rawState=03 00 00 00 00 00 00 00 00 00
+lighting live-projection(target=1) led=0x0a brightness=51 rawBrightness=33 color=unparsed rawState=03 00 00 00 00 00 00 00 00 00
+lighting stored-slot=1(target=2) led=0x04 brightness=0 rawBrightness=00 color=unparsed rawState=00 00 00 00 00 00 00 00 00 00
+lighting stored-slot=1(target=2) led=0x01 brightness=85 rawBrightness=55 color=unparsed rawState=03 01 28 01 00 ff 00 00 ff 00
+lighting stored-slot=1(target=2) led=0x0a brightness=85 rawBrightness=55 color=unparsed rawState=03 01 28 01 00 ff 00 00 ff 00
+lighting stored-slot=2(target=3) led=0x04 brightness=0 rawBrightness=00 color=unparsed rawState=00 00 00 00 00 00 00 00 00 00
+lighting stored-slot=2(target=3) led=0x01 brightness=85 rawBrightness=55 color=unparsed rawState=03 01 28 01 00 ff 00 00 ff 00
+lighting stored-slot=2(target=3) led=0x0a brightness=85 rawBrightness=55 color=unparsed rawState=03 01 28 01 00 ff 00 00 ff 00
+lighting stored-slot=3(target=4) led=0x04 brightness=0 rawBrightness=00 color=unparsed rawState=00 00 00 00 00 00 00 00 00 00
+lighting stored-slot=3(target=4) led=0x01 brightness=85 rawBrightness=55 color=unparsed rawState=03 01 28 01 00 ff 00 00 ff 00
+lighting stored-slot=3(target=4) led=0x0a brightness=85 rawBrightness=55 color=unparsed rawState=03 01 28 01 00 ff 00 00 ff 00
+lighting stored-slot=4(target=5) led=0x04 brightness=0 rawBrightness=00 color=unparsed rawState=00 00 00 00 00 00 00 00 00 00
+lighting stored-slot=4(target=5) led=0x01 brightness=85 rawBrightness=55 color=unparsed rawState=03 01 28 01 00 ff 00 00 ff 00
+lighting stored-slot=4(target=5) led=0x0a brightness=85 rawBrightness=55 color=unparsed rawState=03 01 28 01 00 ff 00 00 ff 00
+button stored-slot=1(target=2) slot=1 key=08 84 02 01
+payload[16]=01 00 01 01 01 01 01 01 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 01 00 00 00 00 block=01010100000000 class=0x01 len=1 data=01
+button stored-slot=1(target=2) slot=2 key=08 84 02 02
+payload[16]=02 00 01 01 01 01 02 02 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 02 00 00 00 00 block=01010200000000 class=0x01 len=1 data=02
+button stored-slot=1(target=2) slot=3 key=08 84 02 03
+payload[16]=03 00 01 01 01 01 03 03 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 03 00 00 00 00 block=01010300000000 class=0x01 len=1 data=03
+button stored-slot=1(target=2) slot=4 key=08 84 02 04
+payload[16]=04 00 01 01 01 01 04 04 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 04 00 00 00 00 block=01010400000000 class=0x01 len=1 data=04
+button stored-slot=1(target=2) slot=5 key=08 84 02 05
+payload[16]=05 00 01 01 01 01 05 05 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 05 00 00 00 00 block=01010500000000 class=0x01 len=1 data=05
+button stored-slot=1(target=2) slot=9 key=08 84 02 09
+payload[16]=09 00 01 01 01 01 09 09 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 09 00 00 00 00 block=01010900000000 class=0x01 len=1 data=09
+button stored-slot=1(target=2) slot=10 key=08 84 02 0a
+payload[16]=0a 00 01 01 01 01 0a 0a 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 0a 00 00 00 00 block=01010a00000000 class=0x01 len=1 data=0a
+button stored-slot=1(target=2) slot=14 key=08 84 02 0e
+payload[16]=0e 00 07 07 01 01 04 04 00 00 00 00 00 00 00 00 decoded-function[7]=07 01 04 00 00 00 00 block=07010400000000 class=0x07 len=1 data=04
+button stored-slot=1(target=2) slot=15 key=08 84 02 0f
+payload[16]=0f 00 06 06 01 01 05 05 01 01 90 90 01 01 90 90 decoded-function[7]=06 01 05 01 90 01 90 block=06010501900190 class=0x06 len=1 data=05
+button stored-slot=1(target=2) slot=52 key=08 84 02 34
+payload[16]=34 00 0e 0e 01 01 68 68 00 00 14 14 00 00 00 00 decoded-function[7]=0e 01 68 00 14 00 00 block=0e016800140000 class=0x0e len=1 data=68
+button stored-slot=1(target=2) slot=53 key=08 84 02 35
+payload[16]=35 00 0e 0e 01 01 69 69 00 00 14 14 00 00 00 00 decoded-function[7]=0e 01 69 00 14 00 00 block=0e016900140000 class=0x0e len=1 data=69
+button stored-slot=1(target=2) slot=96 key=08 84 02 60
+payload[16]=60 00 06 06 01 01 06 06 00 00 00 00 00 00 00 00 decoded-function[7]=06 01 06 00 00 00 00 block=06010600000000 class=0x06 len=1 data=06
+button stored-slot=1(target=2) slot=106 key=08 84 02 6a
+payload[16]=6a 00 12 12 01 01 01 01 00 00 00 00 00 00 00 00 decoded-function[7]=12 01 01 00 00 00 00 block=12010100000000 class=0x12 len=1 data=01
+button stored-slot=2(target=3) slot=1 key=08 84 03 01
+payload[16]=01 00 01 01 01 01 01 01 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 01 00 00 00 00 block=01010100000000 class=0x01 len=1 data=01
+button stored-slot=2(target=3) slot=2 key=08 84 03 02
+payload[16]=02 00 01 01 01 01 02 02 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 02 00 00 00 00 block=01010200000000 class=0x01 len=1 data=02
+button stored-slot=2(target=3) slot=3 key=08 84 03 03
+payload[16]=03 00 01 01 01 01 03 03 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 03 00 00 00 00 block=01010300000000 class=0x01 len=1 data=03
+button stored-slot=2(target=3) slot=4 key=08 84 03 04
+payload[16]=04 00 01 01 01 01 04 04 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 04 00 00 00 00 block=01010400000000 class=0x01 len=1 data=04
+button stored-slot=2(target=3) slot=5 key=08 84 03 05
+payload[16]=05 00 01 01 01 01 05 05 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 05 00 00 00 00 block=01010500000000 class=0x01 len=1 data=05
+button stored-slot=2(target=3) slot=9 key=08 84 03 09
+payload[16]=09 00 01 01 01 01 09 09 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 09 00 00 00 00 block=01010900000000 class=0x01 len=1 data=09
+button stored-slot=2(target=3) slot=10 key=08 84 03 0a
+payload[16]=0a 00 01 01 01 01 0a 0a 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 0a 00 00 00 00 block=01010a00000000 class=0x01 len=1 data=0a
+button stored-slot=2(target=3) slot=14 key=08 84 03 0e
+payload[16]=0e 00 07 07 01 01 04 04 00 00 00 00 00 00 00 00 decoded-function[7]=07 01 04 00 00 00 00 block=07010400000000 class=0x07 len=1 data=04
+button stored-slot=2(target=3) slot=15 key=08 84 03 0f
+payload[16]=0f 00 06 06 01 01 05 05 01 01 90 90 01 01 90 90 decoded-function[7]=06 01 05 01 90 01 90 block=06010501900190 class=0x06 len=1 data=05
+button stored-slot=2(target=3) slot=52 key=08 84 03 34
+payload[16]=34 00 0e 0e 01 01 68 68 00 00 14 14 00 00 00 00 decoded-function[7]=0e 01 68 00 14 00 00 block=0e016800140000 class=0x0e len=1 data=68
+button stored-slot=2(target=3) slot=53 key=08 84 03 35
+payload[16]=35 00 0e 0e 01 01 69 69 00 00 14 14 00 00 00 00 decoded-function[7]=0e 01 69 00 14 00 00 block=0e016900140000 class=0x0e len=1 data=69
+button stored-slot=2(target=3) slot=96 key=08 84 03 60
+payload[16]=60 00 06 06 01 01 06 06 00 00 00 00 00 00 00 00 decoded-function[7]=06 01 06 00 00 00 00 block=06010600000000 class=0x06 len=1 data=06
+button stored-slot=2(target=3) slot=106 key=08 84 03 6a
+payload[16]=6a 00 12 12 01 01 01 01 00 00 00 00 00 00 00 00 decoded-function[7]=12 01 01 00 00 00 00 block=12010100000000 class=0x12 len=1 data=01
+button stored-slot=3(target=4) slot=1 key=08 84 04 01
+payload[16]=01 00 01 01 01 01 01 01 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 01 00 00 00 00 block=01010100000000 class=0x01 len=1 data=01
+button stored-slot=3(target=4) slot=2 key=08 84 04 02
+payload[16]=02 00 01 01 01 01 02 02 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 02 00 00 00 00 block=01010200000000 class=0x01 len=1 data=02
+button stored-slot=3(target=4) slot=3 key=08 84 04 03
+payload[16]=03 00 01 01 01 01 03 03 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 03 00 00 00 00 block=01010300000000 class=0x01 len=1 data=03
+button stored-slot=3(target=4) slot=4 key=08 84 04 04
+payload[16]=04 00 01 01 01 01 04 04 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 04 00 00 00 00 block=01010400000000 class=0x01 len=1 data=04
+button stored-slot=3(target=4) slot=5 key=08 84 04 05
+payload[16]=05 00 01 01 01 01 05 05 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 05 00 00 00 00 block=01010500000000 class=0x01 len=1 data=05
+button stored-slot=3(target=4) slot=9 key=08 84 04 09
+payload[16]=09 00 01 01 01 01 09 09 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 09 00 00 00 00 block=01010900000000 class=0x01 len=1 data=09
+button stored-slot=3(target=4) slot=10 key=08 84 04 0a
+payload[16]=0a 00 01 01 01 01 0a 0a 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 0a 00 00 00 00 block=01010a00000000 class=0x01 len=1 data=0a
+button stored-slot=3(target=4) slot=14 key=08 84 04 0e
+payload[16]=0e 00 07 07 01 01 04 04 00 00 00 00 00 00 00 00 decoded-function[7]=07 01 04 00 00 00 00 block=07010400000000 class=0x07 len=1 data=04
+button stored-slot=3(target=4) slot=15 key=08 84 04 0f
+payload[16]=0f 00 06 06 01 01 05 05 01 01 90 90 01 01 90 90 decoded-function[7]=06 01 05 01 90 01 90 block=06010501900190 class=0x06 len=1 data=05
+button stored-slot=3(target=4) slot=52 key=08 84 04 34
+payload[16]=34 00 0e 0e 01 01 68 68 00 00 14 14 00 00 00 00 decoded-function[7]=0e 01 68 00 14 00 00 block=0e016800140000 class=0x0e len=1 data=68
+button stored-slot=3(target=4) slot=53 key=08 84 04 35
+payload[16]=35 00 0e 0e 01 01 69 69 00 00 14 14 00 00 00 00 decoded-function[7]=0e 01 69 00 14 00 00 block=0e016900140000 class=0x0e len=1 data=69
+button stored-slot=3(target=4) slot=96 key=08 84 04 60
+payload[16]=60 00 06 06 01 01 06 06 00 00 00 00 00 00 00 00 decoded-function[7]=06 01 06 00 00 00 00 block=06010600000000 class=0x06 len=1 data=06
+button stored-slot=3(target=4) slot=106 key=08 84 04 6a
+payload[16]=6a 00 12 12 01 01 01 01 00 00 00 00 00 00 00 00 decoded-function[7]=12 01 01 00 00 00 00 block=12010100000000 class=0x12 len=1 data=01
+button stored-slot=4(target=5) slot=1 key=08 84 05 01
+payload[16]=01 00 01 01 01 01 01 01 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 01 00 00 00 00 block=01010100000000 class=0x01 len=1 data=01
+button stored-slot=4(target=5) slot=2 key=08 84 05 02
+payload[16]=02 00 01 01 01 01 02 02 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 02 00 00 00 00 block=01010200000000 class=0x01 len=1 data=02
+button stored-slot=4(target=5) slot=3 key=08 84 05 03
+payload[16]=03 00 01 01 01 01 03 03 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 03 00 00 00 00 block=01010300000000 class=0x01 len=1 data=03
+button stored-slot=4(target=5) slot=4 key=08 84 05 04
+payload[16]=04 00 01 01 01 01 04 04 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 04 00 00 00 00 block=01010400000000 class=0x01 len=1 data=04
+button stored-slot=4(target=5) slot=5 key=08 84 05 05
+payload[16]=05 00 01 01 01 01 05 05 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 05 00 00 00 00 block=01010500000000 class=0x01 len=1 data=05
+button stored-slot=4(target=5) slot=9 key=08 84 05 09
+payload[16]=09 00 01 01 01 01 09 09 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 09 00 00 00 00 block=01010900000000 class=0x01 len=1 data=09
+button stored-slot=4(target=5) slot=10 key=08 84 05 0a
+payload[16]=0a 00 01 01 01 01 0a 0a 00 00 00 00 00 00 00 00 decoded-function[7]=01 01 0a 00 00 00 00 block=01010a00000000 class=0x01 len=1 data=0a
+button stored-slot=4(target=5) slot=14 key=08 84 05 0e
+payload[16]=0e 00 07 07 01 01 04 04 00 00 00 00 00 00 00 00 decoded-function[7]=07 01 04 00 00 00 00 block=07010400000000 class=0x07 len=1 data=04
+button stored-slot=4(target=5) slot=15 key=08 84 05 0f
+payload[16]=0f 00 06 06 01 01 05 05 01 01 90 90 01 01 90 90 decoded-function[7]=06 01 05 01 90 01 90 block=06010501900190 class=0x06 len=1 data=05
+button stored-slot=4(target=5) slot=52 key=08 84 05 34
+payload[16]=34 00 0e 0e 01 01 68 68 00 00 14 14 00 00 00 00 decoded-function[7]=0e 01 68 00 14 00 00 block=0e016800140000 class=0x0e len=1 data=68
+button stored-slot=4(target=5) slot=53 key=08 84 05 35
+payload[16]=35 00 0e 0e 01 01 69 69 00 00 14 14 00 00 00 00 decoded-function[7]=0e 01 69 00 14 00 00 block=0e016900140000 class=0x0e len=1 data=69
+button stored-slot=4(target=5) slot=96 key=08 84 05 60
+payload[16]=60 00 06 06 01 01 06 06 00 00 00 00 00 00 00 00 decoded-function[7]=06 01 06 00 00 00 00 block=06010600000000 class=0x06 len=1 data=06
+button stored-slot=4(target=5) slot=106 key=08 84 05 6a
+payload[16]=6a 00 12 12 01 01 01 01 00 00 00 00 00 00 00 00 decoded-function[7]=12 01 01 00 00 00 00 block=12010100000000 class=0x12 len=1 data=01
+[exit=0]
+

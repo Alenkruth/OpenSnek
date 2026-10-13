@@ -49,7 +49,7 @@ actor ProbeBridge {
         guard let targets = try await bluetoothLightingTargets(preferredPeripheralName: preferredPeripheralName, zoneID: zoneID) else { return nil }
 
         let profile = await bluetoothLightingProfile(preferredPeripheralName: preferredPeripheralName)
-        let usesZoneState = profile?.id == .basiliskV3Pro
+        let usesZoneState = profile?.id.isBasiliskV3ProFamily == true
         var results: [BTLightingReadResult] = []
         results.reserveCapacity(targets.count)
 
@@ -95,7 +95,7 @@ actor ProbeBridge {
         guard let targets = try await bluetoothLightingTargets(preferredPeripheralName: preferredPeripheralName, zoneID: zoneID) else { return nil }
 
         let profile = await bluetoothLightingProfile(preferredPeripheralName: preferredPeripheralName)
-        let usesZoneState = profile?.id == .basiliskV3Pro
+        let usesZoneState = profile?.id.isBasiliskV3ProFamily == true
         let v3ProPayload = Array(BLEVendorProtocol.buildV3ProLightingZoneStatePayload(r: color.r, g: color.g, b: color.b))
         let legacyPayload: [UInt8] = [0x04, 0x00, 0x00, 0x00, 0x00, UInt8(max(0, min(255, color.r))), UInt8(max(0, min(255, color.g))), UInt8(max(0, min(255, color.b)))]
 
