@@ -406,8 +406,21 @@ extension BridgeClient {
         return r[0] == 0x02
     }
 
+    func readUSBBattery(device: MouseDevice) async throws -> BatteryTelemetry? {
+        guard device.transport == .usb else { return nil }
+        try await deferUSBReconnectReadIfNeeded(deviceID: device.id, operation: "battery")
+        guard let session = sessionFor(device: device) else { throw BridgeError.commandFailed("Device not available") }
+        return try session.withExclusiveDeviceAccess {
+            guard let battery = try getBattery(session, device) else { return nil }
+            return BatteryTelemetry(percent: battery.0, charging: battery.1)
+        }
+    }
+
     func getBattery(_ session: USBHIDControlSession, _ device: MouseDevice) throws -> (Int, Bool?)? {
-        guard let response = try perform(session, device, classID: 0x07, cmdID: 0x80, size: 0x02), let percent = USBHIDProtocol.parseBatteryLevelPercent(response) else { return nil }
+        let response = try perform(session, device, classID: 0x07, cmdID: 0x80, size: 0x02)
+        let percent = response.flatMap(USBHIDProtocol.parseBatteryLevelPercent)
+        logUSBPowerResponse(device: device, command: "07:80", response: response, value: percent.map(String.init))
+        guard let percent else { return nil }
         let charging = try getChargingStatus(session, device)
         return (percent, charging)
     }
@@ -417,7 +430,17 @@ extension BridgeClient {
     /// Returns nil when the device rejects the command.
     func getChargingStatus(_ session: USBHIDControlSession, _ device: MouseDevice) throws -> Bool? {
         let response = try perform(session, device, classID: 0x07, cmdID: 0x84, size: 0x02)
-        return response.flatMap(USBHIDProtocol.parseChargingStatus)
+        let charging = response.flatMap(USBHIDProtocol.parseChargingStatus)
+        logUSBPowerResponse(device: device, command: "07:84", response: response, value: charging.map(String.init))
+        return charging
+    }
+
+    private func logUSBPowerResponse(device: MouseDevice, command: String, response: [UInt8]?, value: String?) {
+        guard AppLog.currentLevel == .debug else { return }
+        let headerLength = 8
+        let powerPayloadLength = 2
+        let report = response.map { $0.prefix(headerLength + powerPayloadLength).map { String(format: "%02x", $0) }.joined(separator: " ") } ?? "nil"
+        AppLog.debug("Bridge", "usbBattery device=\(device.id) command=\(command) report=\(report) value=\(value ?? "nil")")
     }
 
     func getSerial(_ session: USBHIDControlSession, _ device: MouseDevice) throws -> String? {

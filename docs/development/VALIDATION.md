@@ -189,6 +189,37 @@ Fail patterns:
 - repeated mirrored last-slot values after multi-stage writes
 - stale-read masking that never converges
 
+### Stale USB battery diagnosis
+
+Enable Debug logging in Settings → Logging before reproducing. Keep the
+app and background service running when the battery becomes stale; restarting
+can erase the stuck state. Note the time, the app and menu bar percentages, the
+selected device, whether the main window is open, and whether the mouse recently
+slept, disconnected, or started charging.
+
+```bash
+tail -n 1500 ~/Library/Logs/OpenSnek/open-snek.log | rg "usbBattery|refreshState|remoteSnapshot selected|software-lighting-cache"
+swift run --package-path OpenSnek OpenSnekProbe usb-battery-read --pid 0x00ab
+```
+
+The probe is a read-only comparison for a connected Basilisk V3 Pro. Run it while
+the UI is stale, before restarting. `usbBattery` records the USB response header
+and two power payload bytes for battery (`07:80`) and charging (`07:84`), plus
+the parsed value. `refreshState read-result` shows incoming battery telemetry;
+`refreshState cached` shows the merged state; `remoteSnapshot selected` shows
+the state delivered to the app. A `nil` incoming battery may retain the previous
+percentage, so a successful refresh alone does not prove fresh battery data.
+Read-start without read-result, skipped refresh reasons, or missing reads help
+separate a blocked refresh from a stale device response or snapshot.
+`readState software-lighting-cache` identifies a poll served from the software
+lighting cache, including its cached battery value and state timestamp.
+
+Capture both sleep/offline and wake/reconnect while checking that battery updates
+resume without an app restart. Compare with the app window open and closed. A
+stable percentage over a short interval is normal; compare charging transitions
+or an independently observed battery change. Save the relevant log before
+restoring Warning logging, since changing the log level in-app resets the log.
+
 ### USB connection-state diagnosis
 
 A USB device that flips between Connected and Reconnecting while DPI, stages, and poll rate read successfully usually returned a state missing one supported telemetry field; the missing field is misread as an unavailable device. Enable debug logging first and restore `warning` afterwards:

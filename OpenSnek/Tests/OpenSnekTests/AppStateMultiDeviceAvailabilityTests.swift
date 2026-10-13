@@ -201,9 +201,13 @@ final class AppStateMultiDeviceAvailabilityTests: XCTestCase {
 
         XCTAssertFalse(failed)
         XCTAssertEqual(failedReadCount, initialReadCount + 1)
+        let batteryWhileAsleep = await MainActor.run { appState.deviceStore.state?.battery_percent }
+        XCTAssertEqual(batteryWhileAsleep, 81)
+        let recoveredState = makeTestState(device: usbDevice, connection: "usb", batteryPercent: 79, dpiValues: [800, 1600, 3200], activeStage: 0)
+        await backend.setState(recoveredState, for: usbDevice.id)
         await MainActor.run { appState.deviceController.applyBackendUSBControlAvailabilityUpdate(deviceID: usbDevice.id, availability: .receiverPresentMouseReachable, updatedAt: Date()) }
 
-        try await waitForAppStateCondition { await backend.readCount(for: usbDevice.id) >= failedReadCount + 1 }
+        try await waitForAppStateCondition { await MainActor.run { appState.deviceStore.state?.battery_percent == 79 } }
 
         let status = await MainActor.run { appState.deviceStore.currentDeviceStatusIndicator.label }
         let controlsEnabled = await MainActor.run { appState.deviceStore.selectedDeviceControlsEnabled }
@@ -487,13 +491,12 @@ final class AppStateMultiDeviceAvailabilityTests: XCTestCase {
         // The Mouse Dock cannot read its effect/brightness state (0x0F:0x82/0x84), so its
         // state refresh is always partial. It must stay connected instead of looping through
         // telemetry-unavailable backoff and reconnect presentations.
-        let dock = makeTestDevice(
-            id: "usb-mouse-dock-partial-telemetry", productName: "Mouse Dock", identity: MultiDeviceTestIdentity(transport: .usb, serial: "USB-MOUSE-DOCK-PARTIAL", locationID: 1), profile: .mouseDock, productID: 0x007E)
+        let dock = makeTestDevice(id: "usb-mouse-dock-partial-telemetry", productName: "Mouse Dock", identity: MultiDeviceTestIdentity(transport: .usb, serial: "USB-MOUSE-DOCK-PARTIAL", locationID: 1), profile: .mouseDock, productID: 0x007E)
         let fullState = makeTestState(device: dock, connection: "usb", batteryPercent: 0, dpiValues: [800, 1600, 3200], activeStage: 0)
         let partialState = MouseState(
-            device: fullState.device, connection: fullState.connection, battery_percent: fullState.battery_percent, charging: fullState.charging, dpi: fullState.dpi, dpi_stages: fullState.dpi_stages, poll_rate: nil, sleep_timeout: fullState.sleep_timeout,
-            device_mode: fullState.device_mode, low_battery_threshold_raw: fullState.low_battery_threshold_raw, scroll_mode: fullState.scroll_mode, scroll_acceleration: fullState.scroll_acceleration, scroll_smart_reel: fullState.scroll_smart_reel,
-            active_onboard_profile: fullState.active_onboard_profile, onboard_profile_count: fullState.onboard_profile_count, led_value: nil, capabilities: fullState.capabilities)
+            device: fullState.device, connection: fullState.connection, battery_percent: fullState.battery_percent, charging: fullState.charging, dpi: fullState.dpi, dpi_stages: fullState.dpi_stages, poll_rate: nil, sleep_timeout: fullState.sleep_timeout, device_mode: fullState.device_mode,
+            low_battery_threshold_raw: fullState.low_battery_threshold_raw, scroll_mode: fullState.scroll_mode, scroll_acceleration: fullState.scroll_acceleration, scroll_smart_reel: fullState.scroll_smart_reel, active_onboard_profile: fullState.active_onboard_profile,
+            onboard_profile_count: fullState.onboard_profile_count, led_value: nil, capabilities: fullState.capabilities)
         let backend = DeviceListUpdatingStubBackend(devices: [dock], stateByDeviceID: [dock.id: partialState])
         let appState = await MainActor.run { AppState(launchRole: .app, backend: backend, autoStart: false) }
 
@@ -518,8 +521,7 @@ final class AppStateMultiDeviceAvailabilityTests: XCTestCase {
     func testDockTelemetryUnavailableWithoutCacheShowsDisconnected() async {
         // A genuine control-interface failure on the dock still has to present as unavailable;
         // the unreadable lighting state must not make the dock permanently "connected".
-        let dock = makeTestDevice(
-            id: "usb-mouse-dock-telemetry-no-cache", productName: "Mouse Dock", identity: MultiDeviceTestIdentity(transport: .usb, serial: "USB-MOUSE-DOCK-NO-CACHE", locationID: 1), profile: .mouseDock, productID: 0x007E)
+        let dock = makeTestDevice(id: "usb-mouse-dock-telemetry-no-cache", productName: "Mouse Dock", identity: MultiDeviceTestIdentity(transport: .usb, serial: "USB-MOUSE-DOCK-NO-CACHE", locationID: 1), profile: .mouseDock, productID: 0x007E)
         let backend = DeviceListUpdatingStubBackend(devices: [dock], stateByDeviceID: [dock.id: makeTestState(device: dock, connection: "usb", batteryPercent: 0, dpiValues: [800, 1600, 3200], activeStage: 0)])
         let appState = await MainActor.run { AppState(launchRole: .app, backend: backend, autoStart: false) }
         let telemetryUnavailable = "USB device telemetry unavailable. Feature-report interface did not return usable responses."

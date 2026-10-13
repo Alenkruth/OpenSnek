@@ -656,6 +656,8 @@ import OpenSnekHardware
 
     static func diagnosticScrollState(_ state: MouseState) -> String { "mode=\(state.scroll_mode.map(String.init) ?? "nil")," + "accel=\(state.scroll_acceleration.map(String.init) ?? "nil")," + "smart=\(state.scroll_smart_reel.map(String.init) ?? "nil")" }
 
+    static func diagnosticBatteryState(_ state: MouseState) -> String { "percent=\(state.battery_percent.map(String.init) ?? "nil"),charging=\(state.charging.map(String.init) ?? "nil")" }
+
     func latestCachedUpdateAt(sourceDeviceID: String, presentationDeviceID: String) -> Date? { [lastUpdatedByDeviceID[sourceDeviceID], lastUpdatedByDeviceID[presentationDeviceID]].compactMap { $0 }.max() }
 
     func latestCachedMutationAt(sourceDeviceID: String, presentationDeviceID: String) -> Date? { [lastStateMutationAtByDeviceID[sourceDeviceID], lastStateMutationAtByDeviceID[presentationDeviceID]].compactMap { $0 }.max() }

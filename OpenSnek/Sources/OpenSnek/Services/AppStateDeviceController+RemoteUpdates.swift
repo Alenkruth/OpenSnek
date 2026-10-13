@@ -127,7 +127,8 @@ import OpenSnekHardware
         let scroll = Self.diagnosticScrollState(selectedState)
         let pendingLocal = String(applyController.hasPendingLocalEdits)
         let pendingActive = applyController.pendingActiveStageSelection(for: selectedDevice).map(String.init) ?? "nil"
-        AppLog.debug("AppState", "remoteSnapshot selected device=\(selectedDeviceID) " + "active=\(activeStage) " + "dpi=\(dpi) " + "values=\(values) " + "scroll=\(scroll) " + "pendingLocal=\(pendingLocal) " + "pendingActive=\(pendingActive)")
+        AppLog.debug(
+            "AppState", "remoteSnapshot selected device=\(selectedDeviceID) " + "active=\(activeStage) " + "dpi=\(dpi) " + "values=\(values) " + "scroll=\(scroll) " + "battery=\(Self.diagnosticBatteryState(selectedState)) " + "pendingLocal=\(pendingLocal) " + "pendingActive=\(pendingActive)")
         let selectedLastUpdated = lastUpdatedByDeviceID[selectedDeviceID]
         let selectedStateChanged = deviceStore.state != selectedState
         let selectedLastUpdatedChanged = deviceStore.lastUpdated != selectedLastUpdated

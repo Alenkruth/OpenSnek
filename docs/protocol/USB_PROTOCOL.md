@@ -1051,3 +1051,7 @@ Shipped per-profile IDs: all current USB profiles use `0x1F` (`DeviceProfile.usb
 - [razer-macos Project](https://github.com/1kc/razer-macos) (macOS IOKit reference)
 
 ---
+
+### Battery telemetry during software lighting
+
+Software effects retain cached settings to avoid a full settings sweep competing with frame writes. Battery telemetry is read independently with serialized `07:80` and `07:84` commands every 30 seconds while a battery-capable USB device runs an effect. A USB availability transition or physical reconnect makes the next scheduled sample due immediately. Battery reads preserve the latest DPI and lighting state and publish the resulting battery state to service clients. Failed commands are not retried; a later scheduled sample or reconnect provides the next opportunity. Maintainer hardware validation of natural mouse sleep/wake with effects running remains pending.

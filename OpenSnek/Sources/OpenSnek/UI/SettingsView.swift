@@ -7,6 +7,7 @@ struct SettingsView: View {
     let deviceStore: DeviceStore
     let runtimeStore: RuntimeStore
     @AppStorage(AppLog.levelDefaultsKey) private var logLevelRawValue = AppLog.currentLevel.rawValue
+    @AppStorage(ReleaseUpdateChecker.includeReleaseCandidatesDefaultsKey) private var includeReleaseCandidates = false
     @AppStorage(DeveloperRuntimeOptions.pollingEnabledDefaultsKey) private var developerPollingEnabled = true
     @AppStorage(DeveloperRuntimeOptions.passiveHIDUpdatesEnabledDefaultsKey) private var developerPassiveHIDUpdatesEnabled = true
     @AppStorage(DeveloperRuntimeOptions.rememberWindowSizeEnabledDefaultsKey) private var developerRememberWindowSizeEnabled = true
@@ -39,6 +40,7 @@ struct SettingsView: View {
                     developerRememberWindowSizeEnabled = true
                     developerReleaseUpdateDryRunEnabled = false
                     developerSettingStorageEnabled = true
+                    includeReleaseCandidates = false
                 }
             }
         } message: {
@@ -50,6 +52,7 @@ struct SettingsView: View {
         Form {
             permissionsSection
             generalSection
+            updatesSection
             resetSection
             loggingSection
             if deviceStore.currentBuildChannel == .dev { developerSection }
@@ -80,6 +83,13 @@ struct SettingsView: View {
             Toggle("Show menu bar icon", isOn: Binding(get: { runtimeStore.backgroundServiceEnabled }, set: { newValue in Task { await runtimeStore.setBackgroundServiceEnabled(newValue) } }))
             Toggle("Start at login", isOn: Binding(get: { runtimeStore.launchAtStartupEnabled }, set: { runtimeStore.setLaunchAtStartupEnabled($0) })).disabled(!runtimeStore.backgroundServiceEnabled)
             if let message = runtimeStore.compactStatusMessage ?? runtimeStore.serviceStatusMessage { Text(message).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.secondary) }
+        }
+    }
+
+    private var updatesSection: some View {
+        Section("Updates") {
+            Toggle("Include release candidates", isOn: $includeReleaseCandidates).onChange(of: includeReleaseCandidates) { _, _ in runtimeStore.updatePreferencesDidChange() }
+            Text("Receive suggestions for newer release candidates as well as stable releases. RC builds always receive newer RC suggestions.").font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
         }
     }
 
@@ -144,7 +154,7 @@ struct SettingsView: View {
             get: { developerReleaseUpdateDryRunEnabled },
             set: { newValue in
                 developerReleaseUpdateDryRunEnabled = newValue
-                runtimeStore.developerUpdateDryRunSettingsDidChange()
+                runtimeStore.updatePreferencesDidChange()
             })
     }
 

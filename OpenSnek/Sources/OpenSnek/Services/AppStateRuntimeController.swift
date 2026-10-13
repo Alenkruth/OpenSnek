@@ -600,13 +600,14 @@ import OpenSnekCore
         environment.lastReleaseUpdateCheckAt = now
 
         let usesDryRun = Self.usesReleaseUpdateDryRun()
-        guard environment.shouldCheckForReleaseUpdates || usesDryRun else {
+        let includesReleaseCandidates = ReleaseUpdateChecker.includesReleaseCandidates()
+        guard environment.shouldCheckForReleaseUpdates || usesDryRun || includesReleaseCandidates else {
             deviceStore.availableUpdate = nil
             return
         }
 
         guard let currentVersion = environment.currentAppVersion else { return }
-        let checkMode: ReleaseUpdateCheckMode = usesDryRun ? .latestReleaseDryRun : .newerThanCurrent
+        let checkMode = ReleaseUpdateChecker.checkMode(currentVersion: currentVersion, includeReleaseCandidates: includesReleaseCandidates, usesDryRun: usesDryRun)
 
         do {
             deviceStore.availableUpdate = try await environment.releaseUpdateChecker.checkForUpdate(currentVersion: currentVersion, mode: checkMode)
@@ -615,13 +616,13 @@ import OpenSnekCore
     }
 
     func installAvailableUpdate() async {
-        guard deviceStore.availableUpdate != nil, !isInstallingUpdate else { return }
+        guard let release = deviceStore.availableUpdate, !isInstallingUpdate else { return }
         isInstallingUpdate = true
         defer { isInstallingUpdate = false }
         let shouldReconnectService = environment.usesRemoteServiceTransport
         do {
             deviceStore.updateInstallState = .checking
-            try await environment.softwareUpdateInstaller.installLatestRelease { [weak self] state in self?.deviceStore.updateInstallState = state }
+            try await environment.softwareUpdateInstaller.installLatestRelease(release) { [weak self] state in self?.deviceStore.updateInstallState = state }
             deviceStore.updateInstallState = .idle
         } catch { deviceStore.updateInstallState = .failed(error.localizedDescription) }
         if shouldReconnectService {
@@ -733,7 +734,7 @@ import OpenSnekCore
         requestImmediateRuntimePoll(resetPollingDeadlines: true)
     }
 
-    func developerUpdateDryRunSettingsDidChange() async {
+    func updatePreferencesDidChange() async {
         environment.lastReleaseUpdateCheckAt = nil
         await checkForUpdates(force: true)
     }

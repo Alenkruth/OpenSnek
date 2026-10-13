@@ -4,6 +4,7 @@ import OpenSnekAppSupport
 /// Defines release update check modes.
 enum ReleaseUpdateCheckMode: Equatable {
     case newerThanCurrent
+    case includingReleaseCandidates
     case latestReleaseDryRun
 }
 
@@ -35,6 +36,8 @@ struct ReleaseVersion: Comparable, Equatable {
 
     let components: [Int]
     let preRelease: [PreReleaseIdentifier]
+
+    var isReleaseCandidate: Bool { preRelease.first == .textual("rc") }
 
     static func parse(_ rawValue: String) -> ReleaseVersion? {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -103,6 +106,8 @@ struct ReleaseAvailability: Equatable {
     let checkMode: ReleaseUpdateCheckMode
 
     var isDryRun: Bool { checkMode == .latestReleaseDryRun }
+
+    var appcastURL: URL { ReleaseUpdateChecker.releasesPageURL.appendingPathComponent("download").appendingPathComponent("v\(latestVersion)").appendingPathComponent("appcast.xml") }
 }
 
 /// Defines software update install lifecycle values.
@@ -118,24 +123,33 @@ enum SoftwareUpdateInstallState: Equatable {
 }
 
 /// Defines software update installer behavior.
-@MainActor protocol SoftwareUpdateInstalling: AnyObject { func installLatestRelease(statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws }
+@MainActor protocol SoftwareUpdateInstalling: AnyObject { func installLatestRelease(_ release: ReleaseAvailability, statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws }
 
 /// Provides a disabled software update installer fallback.
 @MainActor final class DisabledSoftwareUpdateInstaller: SoftwareUpdateInstalling {
     static let shared = DisabledSoftwareUpdateInstaller()
 
-    func installLatestRelease(statusHandler _: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws { throw NSError(domain: "OpenSnek.Update", code: 1, userInfo: [NSLocalizedDescriptionKey: "Automatic update installation is not configured for this build."]) }
+    func installLatestRelease(_: ReleaseAvailability, statusHandler _: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws {
+        throw NSError(domain: "OpenSnek.Update", code: 1, userInfo: [NSLocalizedDescriptionKey: "Automatic update installation is not configured for this build."])
+    }
 }
 
 /// Stores release update checker data.
 struct ReleaseUpdateChecker: ReleaseUpdateChecking, Sendable {
     /// Carries latest release response data.
-    private struct LatestReleaseResponse: Decodable {
+    struct LatestReleaseResponse: Decodable {
         let tag_name: String
         let html_url: String?
+        let draft: Bool
+        let prerelease: Bool
+        let assets: [ReleaseAsset]
     }
 
+    /// Identifies a published release artifact.
+    struct ReleaseAsset: Decodable { let name: String }
+
     static let periodicCheckInterval: TimeInterval = 60 * 60 * 24
+    static let includeReleaseCandidatesDefaultsKey = "updates.includeReleaseCandidates"
     static let releasesPageURL = URL(string: "https://github.com/gh123man/OpenSnek/releases")!
     static let defaultDryRunAppcastURL = URL(string: "https://github.com/gh123man/OpenSnek/releases/download/sparkle-dryrun/dryrun-appcast.xml")!
 
@@ -144,7 +158,8 @@ struct ReleaseUpdateChecker: ReleaseUpdateChecking, Sendable {
     init(session: URLSession = .shared) { self.session = session }
 
     func checkForUpdate(currentVersion: String, mode: ReleaseUpdateCheckMode = .newerThanCurrent) async throws -> ReleaseAvailability? {
-        var request = URLRequest(url: URL(string: "https://api.github.com/repos/gh123man/OpenSnek/releases/latest")!)
+        let endpoint = mode == .includingReleaseCandidates ? "releases?per_page=100" : "releases/latest"
+        var request = URLRequest(url: URL(string: "https://api.github.com/repos/gh123man/OpenSnek/\(endpoint)")!)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         request.setValue("OpenSnek/\(currentVersion)", forHTTPHeaderField: "User-Agent")
@@ -153,13 +168,32 @@ struct ReleaseUpdateChecker: ReleaseUpdateChecking, Sendable {
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else { return nil }
 
-        let release = try JSONDecoder().decode(LatestReleaseResponse.self, from: data)
-        guard let latest = ReleaseVersion.parse(release.tag_name) else { return nil }
-        if mode == .newerThanCurrent { guard let current = ReleaseVersion.parse(currentVersion), latest > current else { return nil } }
+        let releases = mode == .includingReleaseCandidates ? try JSONDecoder().decode([LatestReleaseResponse].self, from: data) : [try JSONDecoder().decode(LatestReleaseResponse.self, from: data)]
+        return Self.selectUpdate(releases: releases, currentVersion: currentVersion, mode: mode)
+    }
 
-        let latestVersion = release.tag_name.replacingOccurrences(of: #"^[vV]"#, with: "", options: .regularExpression)
-        let releaseURL = release.html_url.flatMap(URL.init(string:)) ?? Self.releasesPageURL
-        return ReleaseAvailability(latestVersion: latestVersion, releaseURL: releaseURL, checkMode: mode)
+    static func selectUpdate(releases: [LatestReleaseResponse], currentVersion: String, mode: ReleaseUpdateCheckMode) -> ReleaseAvailability? {
+        let current = ReleaseVersion.parse(currentVersion)
+        let candidates = releases.compactMap { release -> (LatestReleaseResponse, ReleaseVersion)? in
+            guard !release.draft, let version = ReleaseVersion.parse(release.tag_name) else { return nil }
+            let isStable = !release.prerelease && version.preRelease.isEmpty
+            guard isStable || (mode == .includingReleaseCandidates && version.isReleaseCandidate) else { return nil }
+            let assetNames = Set(release.assets.map(\.name))
+            let bareVersion = release.tag_name.replacingOccurrences(of: #"^[vV]"#, with: "", options: .regularExpression)
+            guard assetNames.contains("appcast.xml"), assetNames.contains("OpenSnek-\(bareVersion).zip") else { return nil }
+            if mode != .latestReleaseDryRun { guard let current, version > current else { return nil } }
+            return (release, version)
+        }
+        guard let selected = candidates.max(by: { $0.1 < $1.1 })?.0 else { return nil }
+        let latestVersion = selected.tag_name.replacingOccurrences(of: #"^[vV]"#, with: "", options: .regularExpression)
+        return ReleaseAvailability(latestVersion: latestVersion, releaseURL: selected.html_url.flatMap(URL.init(string:)) ?? releasesPageURL, checkMode: mode)
+    }
+
+    static func includesReleaseCandidates(defaults: UserDefaults = .standard) -> Bool { defaults.bool(forKey: includeReleaseCandidatesDefaultsKey) }
+
+    static func checkMode(currentVersion: String, includeReleaseCandidates: Bool, usesDryRun: Bool) -> ReleaseUpdateCheckMode {
+        if usesDryRun { return .latestReleaseDryRun }
+        return includeReleaseCandidates || ReleaseVersion.parse(currentVersion)?.isReleaseCandidate == true ? .includingReleaseCandidates : .newerThanCurrent
     }
 
     static func currentAppVersion(bundle: Bundle = .main) -> String? { bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }

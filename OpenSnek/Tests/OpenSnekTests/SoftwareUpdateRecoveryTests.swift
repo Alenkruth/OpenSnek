@@ -55,7 +55,7 @@ import OpenSnekCore
         self.fails = fails
     }
 
-    func installLatestRelease(statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws {
+    func installLatestRelease(_: ReleaseAvailability, statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws {
         statusHandler(.downloading(received: 10, expected: 100))
         oldHost.stop()
         try await newHost.start()

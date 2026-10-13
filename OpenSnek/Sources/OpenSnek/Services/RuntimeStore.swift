@@ -68,5 +68,5 @@ import Observation
 
     func developerTransportSettingsDidChange() { Task { await runtimeController.developerTransportSettingsDidChange() } }
 
-    func developerUpdateDryRunSettingsDidChange() { Task { await runtimeController.developerUpdateDryRunSettingsDidChange() } }
+    func updatePreferencesDidChange() { Task { await runtimeController.updatePreferencesDidChange() } }
 }

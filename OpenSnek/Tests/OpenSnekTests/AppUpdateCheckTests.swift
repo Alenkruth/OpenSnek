@@ -41,6 +41,14 @@ final class AppUpdateCheckTests: XCTestCase {
         XCTAssertNil(appState.deviceStore.availableUpdate)
     }
 
+    @MainActor func testRCBuildChecksForNewerReleaseCandidates() async {
+        let checker = MockReleaseUpdateChecker()
+        let appState = AppState(launchRole: .app, backend: BootstrapPendingBackend.shared, releaseUpdateChecker: checker, currentAppVersion: "1.4.1-rc.1", shouldCheckForReleaseUpdates: true, autoStart: false)
+        await appState.runtimeController.pollRuntimeOnce()
+        let checks = await checker.recordedChecks()
+        XCTAssertEqual(checks, [RecordedReleaseCheck(version: "1.4.1-rc.1", mode: .includingReleaseCandidates)])
+    }
+
     @MainActor func testDryRunInstallInvokesSparkleInstaller() async {
         let installer = MockSoftwareUpdateInstaller()
         let appState = AppState(launchRole: .app, backend: BootstrapPendingBackend.shared, softwareUpdateInstaller: installer, autoStart: false)
@@ -50,6 +58,7 @@ final class AppUpdateCheckTests: XCTestCase {
 
         XCTAssertEqual(appState.deviceStore.updateInstallState, .idle)
         XCTAssertEqual(installer.installCallCount, 1)
+        XCTAssertEqual(installer.installedRelease, appState.deviceStore.availableUpdate)
     }
 
     @MainActor func testInstallAvailableUpdateInvokesInstallerForRealRelease() async {
@@ -68,6 +77,7 @@ final class AppUpdateCheckTests: XCTestCase {
         XCTAssertEqual(appState.deviceStore.updateInstallState, .idle)
         XCTAssertFalse(appState.runtimeController.isInstallingUpdate)
         XCTAssertEqual(installer.installCallCount, 1)
+        XCTAssertEqual(installer.installedRelease, appState.deviceStore.availableUpdate)
     }
 }
 
@@ -93,12 +103,14 @@ private actor MockReleaseUpdateChecker: ReleaseUpdateChecking {
 @MainActor private final class MockSoftwareUpdateInstaller: SoftwareUpdateInstalling {
     private let statuses: [SoftwareUpdateInstallState]
     private(set) var installCallCount = 0
+    private(set) var installedRelease: ReleaseAvailability?
     var operation: @MainActor () async -> Void = {}
 
     init(statuses: [SoftwareUpdateInstallState] = []) { self.statuses = statuses }
 
-    func installLatestRelease(statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws {
+    func installLatestRelease(_ release: ReleaseAvailability, statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws {
         installCallCount += 1
+        installedRelease = release
         for status in statuses { statusHandler(status) }
         await operation()
     }

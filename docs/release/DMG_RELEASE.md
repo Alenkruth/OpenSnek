@@ -117,7 +117,7 @@ That script:
 - creates an annotated `v<version>` tag
 - pushes `main` and the tag
 
-Versions with a prerelease suffix, such as `1.2.0-beta.1`, are published by the GitHub Actions workflow as GitHub prereleases with `latest=false`. OpenSnek checks GitHub's latest full release endpoint for update banners, so beta prereleases do not prompt existing stable users to update.
+Versions with a prerelease suffix, such as `1.2.0-beta.1`, are published by the GitHub Actions workflow as GitHub prereleases with `latest=false`. Stable builds use GitHub's latest full release endpoint by default. RC builds automatically consider newer RC and stable releases; Settings → Updates → Include release candidates opts other builds in (default off). Other prereleases, drafts, and releases missing update artifacts are excluded. Candidates are compared by semantic version, and the installer uses the selected release's appcast.
 
 The GitHub Actions workflow can also be triggered manually by pushing a version tag:
 
@@ -146,7 +146,7 @@ OpenSnek uses GitHub Releases as the Sparkle backend. The app feed URL is:
 https://github.com/gh123man/OpenSnek/releases/latest/download/appcast.xml
 ```
 
-Stable releases are marked as GitHub's latest release, so existing users read the latest stable `appcast.xml`. Prerelease appcasts are uploaded to their prerelease tags but are not selected by the `/latest/download/` feed URL.
+Stable releases are marked as GitHub's latest release, so existing users read the latest stable `appcast.xml`. When an RC is suggested, the installer selects its `/releases/download/v<version>/appcast.xml` feed instead. This also pins stable suggestions to the release shown in the update banner.
 
 Developer dry-run update checks use a stable GitHub prerelease appcast:
 

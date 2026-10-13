@@ -15,7 +15,7 @@ import OpenSnekAppSupport
         super.init()
     }
 
-    func installLatestRelease(statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws {
+    func installLatestRelease(_ release: ReleaseAvailability, statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) async throws {
         guard Self.isConfigured() else { throw NSError(domain: "OpenSnek.Update", code: 1, userInfo: [NSLocalizedDescriptionKey: "Automatic update installation is not configured for this build."]) }
 
         guard !OpenSnekProcessRole.current.isService else { throw NSError(domain: "OpenSnek.Update", code: 2, userInfo: [NSLocalizedDescriptionKey: "Open the OpenSnek window to install updates."]) }
@@ -24,6 +24,7 @@ import OpenSnekAppSupport
         try await serviceCoordinator.softwareUpdateSession.run(processes: processes) {
             let updaterController = self.makeUpdaterControllerIfNeeded(statusHandler: statusHandler)
             self.updaterDelegate?.statusHandler = statusHandler
+            self.updaterDelegate?.release = release
             updaterController.checkForUpdates(nil)
         }
     }
@@ -49,6 +50,7 @@ import OpenSnekAppSupport
 @MainActor private final class OpenSnekSparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate {
     private let serviceCoordinator: BackgroundServiceCoordinator
     var statusHandler: @MainActor (SoftwareUpdateInstallState) -> Void
+    var release: ReleaseAvailability?
 
     init(serviceCoordinator: BackgroundServiceCoordinator, statusHandler: @escaping @MainActor (SoftwareUpdateInstallState) -> Void) {
         self.serviceCoordinator = serviceCoordinator
@@ -56,13 +58,13 @@ import OpenSnekAppSupport
     }
 
     func bestValidUpdate(in appcast: SUAppcast, for _: SPUUpdater) -> SUAppcastItem? {
-        guard Self.shouldForceLatestUpdateForDryRun else { return nil }
+        guard release?.isDryRun == true, Self.shouldForceLatestUpdateForDryRun else { return nil }
         return appcast.items.first
     }
 
     func feedURLString(for _: SPUUpdater) -> String? {
-        guard Self.shouldForceLatestUpdateForDryRun else { return nil }
-        return ReleaseUpdateChecker.dryRunAppcastURL().absoluteString
+        if release?.isDryRun == true, Self.shouldForceLatestUpdateForDryRun { return ReleaseUpdateChecker.dryRunAppcastURL().absoluteString }
+        return release?.appcastURL.absoluteString
     }
 
     func updater(_: SPUUpdater, willDownloadUpdate _: SUAppcastItem, with _: NSMutableURLRequest) { statusHandler(.downloading(received: 0, expected: nil)) }

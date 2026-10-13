@@ -12,6 +12,8 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
 
     private let client = BridgeClient()
     private let softwareLightingEngine: SoftwareLightingEngine
+    private let softwareLightingBatterySampler = SoftwareLightingBatterySampler()
+    private var batteryConnectionGenerationByDeviceID: [String: UInt64] = [:]
     private var cachedDevices: [MouseDevice] = []
     private var cachedDevicesAt: Date?
     private var cachedStateByDeviceID: [String: MouseState] = [:]
@@ -104,10 +106,23 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
     private func softwareLightingCachedReadState(device: MouseDevice, cachedState: MouseState?, readStartedAt: Date) async throws -> MouseState? {
         guard shouldServeCachedTelemetryDuringSoftwareLighting(deviceID: device.id), let cached = cachedState else { return nil }
         try await verifyUSBReachabilityDuringSoftwareLightingIfNeeded(device: device, now: readStartedAt)
+        try await refreshSoftwareLightingBattery(device: device, now: readStartedAt)
+        let resolved = cachedStateByDeviceID[device.id] ?? cached
+        let cachedAt = cachedStateAtByDeviceID[device.id]?.timeIntervalSince1970.description ?? "nil"
+        AppLog.debug("Backend", "readState software-lighting-cache device=\(device.id) battery=\(resolved.battery_percent.map(String.init) ?? "nil") cachedAt=\(cachedAt)")
         #if DEBUG
-            OpenSnekUITestSupport.recordReadState(device: device, state: cached, elapsed: Date().timeIntervalSince(readStartedAt), source: "local-software-lighting-cache")
+            OpenSnekUITestSupport.recordReadState(device: device, state: resolved, elapsed: Date().timeIntervalSince(readStartedAt), source: "local-software-lighting-cache")
         #endif
-        return cached
+        return resolved
+    }
+
+    private func refreshSoftwareLightingBattery(device: MouseDevice, now: Date) async throws {
+        guard device.transport == .usb, DeviceProfiles.resolve(vendorID: device.vendor_id, productID: device.product_id, transport: device.transport)?.supportsPowerManagementControls == true else { return }
+        let generation = batteryConnectionGenerationByDeviceID[device.id, default: 0]
+        let battery = try await softwareLightingBatterySampler.sample(device: device, connectionGeneration: generation, now: now) { [client] device in try await client.readUSBBattery(device: device) }
+        guard let battery, batteryConnectionGenerationByDeviceID[device.id, default: 0] == generation, let latest = cachedStateByDeviceID[device.id] else { return }
+        // Preserve changes received while awaiting the battery read, especially live DPI.
+        storeReadState(battery.applying(to: latest), deviceID: device.id)
     }
 
     private func reusableCachedReadState(device: MouseDevice, readStartedAt: Date, shouldUseFastPolling: Bool) -> MouseState? {
@@ -750,6 +765,7 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
             return
         }
         usbControlAvailabilityByDeviceID[deviceID] = availability
+        batteryConnectionGenerationByDeviceID[deviceID, default: 0] &+= 1
         AppLog.debug("Backend", "usbControlAvailability device=\(deviceID) availability=\(availability.rawValue)")
         publishStateUpdate(.usbControlAvailability(deviceID: deviceID, availability: availability, updatedAt: updatedAt))
         refreshSoftwareLightingBatteryPercents()
@@ -805,6 +821,7 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
     }
 
     private func invalidateCachedTelemetry(for deviceID: String) {
+        batteryConnectionGenerationByDeviceID[deviceID, default: 0] &+= 1
         if let cached = cachedStateByDeviceID[deviceID] { reconnectSeedStateByDeviceID[deviceID] = cached }
         cachedDevicesAt = nil
         cachedStateByDeviceID.removeValue(forKey: deviceID)
@@ -831,6 +848,7 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
     private func purgeCaches(forRemovedDeviceIDs removedDeviceIDs: Set<String>) {
         guard !removedDeviceIDs.isEmpty else { return }
         for deviceID in removedDeviceIDs {
+            batteryConnectionGenerationByDeviceID[deviceID, default: 0] &+= 1
             cachedStateByDeviceID.removeValue(forKey: deviceID)
             cachedStateAtByDeviceID.removeValue(forKey: deviceID)
             cachedFastByDeviceID.removeValue(forKey: deviceID)

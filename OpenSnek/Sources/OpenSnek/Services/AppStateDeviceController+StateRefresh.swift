@@ -110,7 +110,9 @@ private struct RefreshStateReadContext {
         let wasRecoveringUSBBackoff = device.transport == .usb && (stateRefreshSuppressedUntilByDeviceID[refreshDeviceID] != nil || usbTelemetryUnavailableBackoffDeviceIDs.contains(refreshDeviceID) || (refreshFailureCountByDeviceID[refreshDeviceID] ?? 0) > 0)
 
         do {
+            AppLog.debug("AppState", "refreshState read-start device=\(device.id)")
             let fetched = try await environment.backend.readState(device: device)
+            AppLog.debug("AppState", "refreshState read-result device=\(device.id) battery=\(Self.diagnosticBatteryState(fetched))")
             guard !isTearingDown else { return false }
             guard refreshRevision == applyController.stateRevision else {
                 AppLog.debug("AppState", "refreshState stale-drop rev=\(refreshRevision) current=\(applyController.stateRevision)")
@@ -166,7 +168,10 @@ private struct RefreshStateReadContext {
         // Discovery clears this classification when interfaces change or a device
         // reconnects. Full telemetry reads cannot recover a missing control channel.
         guard usbControlAvailability(for: device) != .noControlInterface else { return false }
-        guard !refreshingStateDeviceIDs.contains(device.id) else { return false }
+        guard !refreshingStateDeviceIDs.contains(device.id) else {
+            AppLog.debug("AppState", "refreshState skipped in-flight device=\(device.id)")
+            return false
+        }
         guard !isRestoringSettings(for: device) else {
             AppLog.debug("AppState", "refreshState skipped restoring-settings device=\(device.id)")
             return false
@@ -259,6 +264,7 @@ private struct RefreshStateReadContext {
         let shouldRestoreSettingsAfterRecovery = shouldRestoreSettingsAfterSuccessfulRecovery(sourceDeviceID: sourceDeviceID, presentationDeviceID: presentationDeviceID, device: presentationDevice)
         let updatedAt = Date()
         cacheState(merged, sourceDeviceID: sourceDeviceID, presentationDeviceID: presentationDeviceID, updatedAt: updatedAt)
+        AppLog.debug("AppState", "refreshState cached device=\(presentationDeviceID) source=\(sourceDeviceID) battery=\(Self.diagnosticBatteryState(merged))")
         if sourceDevice.transport == .usb { recordUSBLiveObservation(sourceDeviceID: sourceDeviceID, presentationDeviceID: presentationDeviceID, observedAt: updatedAt) }
         if clearSeededReconnectState {
             seededReconnectStateDeviceIDs.remove(sourceDeviceID)

@@ -53,6 +53,20 @@ final class RemoteServiceSnapshotHydrationTests: XCTestCase {
         XCTAssertEqual(softwareLightingStatus?.request?.presetID, .aurora)
     }
 
+    @MainActor func testBatteryOnlyRemoteSnapshotUpdatesSelectedPresentation() {
+        let appState = AppState(launchRole: .app, backend: SnapshotTestRemoteBackend(), autoStart: false)
+        let device = makeSnapshotDevice(id: "battery-snapshot", productName: "V3 Pro", identity: SnapshotDeviceIdentity(transport: .usb, serial: "BATTERY-SNAPSHOT", locationID: 1), profile: .basiliskV3Pro)
+        let initialTime = Date()
+        for (index, percent) in [81, 79].enumerated() {
+            let state = makeSnapshotState(device: device, connection: "usb", batteryPercent: percent, dpiValues: [800, 2400, 6400], activeStage: 1)
+            let snapshot = SharedServiceSnapshot(devices: [device], stateByDeviceID: [device.id: state], lastUpdatedByDeviceID: [device.id: initialTime.addingTimeInterval(Double(index))])
+            appState.deviceStore.applyRemoteServiceSnapshot(snapshot)
+            XCTAssertEqual(appState.deviceStore.state?.battery_percent, percent)
+            XCTAssertEqual(appState.deviceStore.stateByDeviceID[device.id]?.battery_percent, percent)
+            XCTAssertEqual(appState.deviceStore.state?.dpi?.x, 2400)
+        }
+    }
+
     func testDuplicateRemoteServiceSnapshotDoesNotRefreshDiagnostics() async throws {
         let backend = SnapshotTestRemoteBackend(shouldUseFastDPIPolling: true)
         let appState = await MainActor.run { AppState(launchRole: .app, backend: backend, autoStart: false) }
