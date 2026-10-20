@@ -688,9 +688,8 @@ public enum DeviceProfiles {
     // five X/Y DPI stages, power timeout, and interleaved Naga button function blocks.
     // No Bluetooth poll-rate or profile CRUD support is claimed. See the 2026-10-18 BLE capture.
     public static let nagaV3ProBluetooth = DeviceProfile(
-        id: .nagaV3Pro, productName: "Naga V3 Pro", transport: .bluetooth, supportedProducts: [0x00E9], buttonLayout: ButtonSlotLayout(visibleSlots: nagaV3ProUSBButtonSlots, writableSlots: nagaV3ProUSBWritableSlots),
-        supportsAdvancedLightingEffects: true, supportedLightingEffects: nagaV3ProUSBLightingEffects, usbLightingLEDIDs: [0x01, 0x04, 0x05], usbLightingZones: nagaV3ProUSBLightingZones, supportsIndependentXYDPI: true,
-        supportsLightingBrightnessControls: true, supportsPollRateControls: false, isLocallyValidated: false)
+        id: .nagaV3Pro, productName: "Naga V3 Pro", transport: .bluetooth, supportedProducts: [0x00E9], buttonLayout: ButtonSlotLayout(visibleSlots: nagaV3ProUSBButtonSlots, writableSlots: nagaV3ProUSBWritableSlots), supportsAdvancedLightingEffects: true,
+        supportedLightingEffects: nagaV3ProUSBLightingEffects, usbLightingLEDIDs: [0x01, 0x04, 0x05], usbLightingZones: nagaV3ProUSBLightingZones, supportsIndependentXYDPI: true, supportsLightingBrightnessControls: true, supportsPollRateControls: false, isLocallyValidated: false)
 
     // MARK: - Razer Basilisk (2017, 0x0064)
 
@@ -808,8 +807,8 @@ public enum DeviceProfiles {
         usbBrightnessLEDIDs: [0x00], usbBrightnessReadLEDIDs: mouseDockProUSBBrightnessReadLEDIDs, isLocallyValidated: false)
 
     public static let all: [DeviceProfile] = [
-        basiliskV3XUSB, basiliskV3USB, basiliskV3ProUSB, basiliskV335KUSB, basiliskV3XBluetooth, basiliskV3ProBluetooth, basiliskV3Pro35KPhantomGreenBluetooth, orochiV2Bluetooth, nagaProUSB, nagaProBluetooth, nagaV2ProUSB, nagaV2ProBluetooth, nagaV3ProUSB, nagaV3ProBluetooth, basiliskUSB, lanceheadTEUSB,
-        huntsmanMiniUSB, tartarusProUSB, mouseDockUSB, mouseDockProUSB
+        basiliskV3XUSB, basiliskV3USB, basiliskV3ProUSB, basiliskV335KUSB, basiliskV3XBluetooth, basiliskV3ProBluetooth, basiliskV3Pro35KPhantomGreenBluetooth, orochiV2Bluetooth, nagaProUSB, nagaProBluetooth, nagaV2ProUSB, nagaV2ProBluetooth, nagaV3ProUSB, nagaV3ProBluetooth, basiliskUSB,
+        lanceheadTEUSB, huntsmanMiniUSB, tartarusProUSB, mouseDockUSB, mouseDockProUSB
     ]
 
     public static func resolve(vendorID: Int, productID: Int, transport: DeviceTransportKind) -> DeviceProfile? { all.first(where: { $0.matches(vendorID: vendorID, productID: productID, transport: transport) }) }

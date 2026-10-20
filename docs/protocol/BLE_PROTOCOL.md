@@ -35,6 +35,11 @@ Out of scope:
 - Hypershift/Boss-clutch remap path beyond the currently mapped button-bind family
 - Media/macro/system button action taxonomy beyond the payloads listed here
 
+Hardware validation uses an opt-in, immutable CoreBluetooth peripheral UUID on its transport
+client. Every exchange, including reconnect and journal recovery, is restricted to that UUID;
+an absent target fails without selecting a same-name peripheral. Normal app name-based routing
+is unchanged. See [hardware validation](../development/VALIDATION.md#safe-hardware-validation).
+
 ## 2. GATT Endpoints
 
 | Item | UUID | Access | Notes |
@@ -64,6 +69,18 @@ The protocol is request/notify based, but OpenSnek treats it as strictly seriali
 - only then start the next exchange
 
 Do not pipeline requests on a single connection. The only correlation token is the one-byte request ID, and out-of-order notify interleaving is easy to create if you overlap commands.
+
+### Manual probe isolation
+
+The app/service and an independent probe can receive each other's vendor notifications, so
+per-client serialization alone is not sufficient for an isolated capture. `OpenSnekProbe` now
+acquires a per-user BLE probe lease and checks that bundled OpenSnek app/service processes are
+stopped before each vendor exchange. Another probe or running app causes a clear error and
+nonzero exit status before commands are sent. Offline `support-catalog` does not acquire the
+lease or open Bluetooth. The lease is advisory, conservatively covers all BLE probes for this
+user, and is released by the kernel on process exit; it does not change normal app reconnect
+logic or coordinate arbitrary third-party clients. See
+[the safe hardware workflow](../development/VALIDATION.md#safe-hardware-validation).
 
 ### 3.2 Request ID
 

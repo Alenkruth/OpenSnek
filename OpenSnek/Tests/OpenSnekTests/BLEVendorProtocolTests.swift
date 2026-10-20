@@ -274,14 +274,8 @@ final class BLEVendorProtocolTests: XCTestCase {
         let primary = RGBPatch(r: 0, g: 0, b: 255)
         let secondary = RGBPatch(r: 255, g: 0, b: 0)
         let expected: [LightingEffectKind: [UInt8]] = [
-            .off: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            .staticColor: [1, 0, 0, 1, 0, 0, 255, 0, 0, 0],
-            .spectrum: [3, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            .wave: [4, 1, 40, 0, 0, 0, 0, 0, 0, 0],
-            .reactive: [5, 0, 2, 1, 0, 0, 255, 0, 0, 0],
-            .pulseRandom: [2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            .pulseSingle: [2, 1, 0, 1, 0, 0, 255, 0, 0, 0],
-            .pulseDual: [2, 2, 0, 2, 0, 0, 255, 255, 0, 0]
+            .off: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], .staticColor: [1, 0, 0, 1, 0, 0, 255, 0, 0, 0], .spectrum: [3, 0, 0, 0, 0, 0, 0, 0, 0, 0], .wave: [4, 1, 40, 0, 0, 0, 0, 0, 0, 0], .reactive: [5, 0, 2, 1, 0, 0, 255, 0, 0, 0], .pulseRandom: [2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            .pulseSingle: [2, 1, 0, 1, 0, 0, 255, 0, 0, 0], .pulseDual: [2, 2, 0, 2, 0, 0, 255, 255, 0, 0]
         ]
         for (kind, payload) in expected {
             let effect = LightingEffectPatch(kind: kind, primary: primary, secondary: secondary, waveDirection: .left, reactiveSpeed: 2)
