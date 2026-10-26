@@ -161,6 +161,8 @@ public struct OnboardProfileSnapshot: Codable, Hashable, Sendable {
     public let buttonBindings: [Int: ButtonBindingDraft]
     public let brightnessByLEDID: [Int: Int]
     public let staticColorByLEDID: [Int: RGBPatch]
+    /// Built-in firmware effects for each LED. The property is optional, so snapshots that were saved before effects existed still decode.
+    public let effectByLEDID: [Int: LightingEffectPatch]?
     public let scrollMode: Int?
     public let scrollAcceleration: Bool?
     public let scrollSmartReel: Bool?
@@ -168,8 +170,8 @@ public struct OnboardProfileSnapshot: Codable, Hashable, Sendable {
     public let hasFetchedMetadata: Bool
 
     public init(
-        profileID: Int, metadata: OnboardProfileMetadata, dpi: OnboardDPIProfileSnapshot? = nil, buttonBindings: [Int: ButtonBindingDraft] = [:], brightnessByLEDID: [Int: Int] = [:], staticColorByLEDID: [Int: RGBPatch] = [:], scrollMode: Int? = nil, scrollAcceleration: Bool? = nil,
-        scrollSmartReel: Bool? = nil, hasFetchedMetadata: Bool = true
+        profileID: Int, metadata: OnboardProfileMetadata, dpi: OnboardDPIProfileSnapshot? = nil, buttonBindings: [Int: ButtonBindingDraft] = [:], brightnessByLEDID: [Int: Int] = [:], staticColorByLEDID: [Int: RGBPatch] = [:], effectByLEDID: [Int: LightingEffectPatch]? = nil, scrollMode: Int? = nil,
+        scrollAcceleration: Bool? = nil, scrollSmartReel: Bool? = nil, hasFetchedMetadata: Bool = true
     ) {
         self.profileID = max(0, profileID)
         self.metadata = metadata
@@ -177,6 +179,7 @@ public struct OnboardProfileSnapshot: Codable, Hashable, Sendable {
         self.buttonBindings = buttonBindings
         self.brightnessByLEDID = brightnessByLEDID.mapValues { max(0, min(255, $0)) }
         self.staticColorByLEDID = staticColorByLEDID
+        self.effectByLEDID = effectByLEDID
         self.scrollMode = scrollMode.map { max(0, min(1, $0)) }
         self.scrollAcceleration = scrollAcceleration
         self.scrollSmartReel = scrollSmartReel
@@ -193,19 +196,22 @@ public struct OnboardProfileMutation: Codable, Hashable, Sendable {
     public var buttonBindings: [Int: ButtonBindingDraft]?
     public var brightnessByLEDID: [Int: Int]?
     public var staticColorByLEDID: [Int: RGBPatch]?
+    /// Built-in firmware effect for each LED. A static color uses `staticColorByLEDID`.
+    public var effectByLEDID: [Int: LightingEffectPatch]?
     public var scrollMode: Int?
     public var scrollAcceleration: Bool?
     public var scrollSmartReel: Bool?
 
     public init(
-        metadata: OnboardProfileMetadata? = nil, dpi: OnboardDPIProfileSnapshot? = nil, buttonBindings: [Int: ButtonBindingDraft]? = nil, brightnessByLEDID: [Int: Int]? = nil, staticColorByLEDID: [Int: RGBPatch]? = nil, scrollMode: Int? = nil, scrollAcceleration: Bool? = nil,
-        scrollSmartReel: Bool? = nil
+        metadata: OnboardProfileMetadata? = nil, dpi: OnboardDPIProfileSnapshot? = nil, buttonBindings: [Int: ButtonBindingDraft]? = nil, brightnessByLEDID: [Int: Int]? = nil, staticColorByLEDID: [Int: RGBPatch]? = nil, effectByLEDID: [Int: LightingEffectPatch]? = nil, scrollMode: Int? = nil,
+        scrollAcceleration: Bool? = nil, scrollSmartReel: Bool? = nil
     ) {
         self.metadata = metadata
         self.dpi = dpi
         self.buttonBindings = buttonBindings
         self.brightnessByLEDID = brightnessByLEDID?.mapValues { max(0, min(255, $0)) }
         self.staticColorByLEDID = staticColorByLEDID
+        self.effectByLEDID = effectByLEDID
         self.scrollMode = scrollMode.map { max(0, min(1, $0)) }
         self.scrollAcceleration = scrollAcceleration
         self.scrollSmartReel = scrollSmartReel
@@ -217,6 +223,7 @@ public struct OnboardProfileMutation: Codable, Hashable, Sendable {
         if buttonBindings != nil { return false }
         if brightnessByLEDID != nil { return false }
         if staticColorByLEDID != nil { return false }
+        if effectByLEDID != nil { return false }
         if scrollMode != nil { return false }
         if scrollAcceleration != nil { return false }
         if scrollSmartReel != nil { return false }
@@ -224,8 +231,11 @@ public struct OnboardProfileMutation: Codable, Hashable, Sendable {
     }
 
     public func merged(with newer: OnboardProfileMutation) -> OnboardProfileMutation {
-        OnboardProfileMutation(
-            metadata: newer.metadata ?? metadata, dpi: newer.dpi ?? dpi, buttonBindings: newer.buttonBindings ?? buttonBindings, brightnessByLEDID: newer.brightnessByLEDID ?? brightnessByLEDID, staticColorByLEDID: newer.staticColorByLEDID ?? staticColorByLEDID,
+        // The newest lighting form wins. A newer static color replaces an older pending effect, and a newer effect replaces an older pending static color.
+        let mergedColors = newer.staticColorByLEDID ?? (newer.effectByLEDID == nil ? staticColorByLEDID : nil)
+        let mergedEffects = newer.effectByLEDID ?? (newer.staticColorByLEDID == nil ? effectByLEDID : nil)
+        return OnboardProfileMutation(
+            metadata: newer.metadata ?? metadata, dpi: newer.dpi ?? dpi, buttonBindings: newer.buttonBindings ?? buttonBindings, brightnessByLEDID: newer.brightnessByLEDID ?? brightnessByLEDID, staticColorByLEDID: mergedColors, effectByLEDID: mergedEffects,
             scrollMode: newer.scrollMode ?? scrollMode, scrollAcceleration: newer.scrollAcceleration ?? scrollAcceleration, scrollSmartReel: newer.scrollSmartReel ?? scrollSmartReel)
     }
 }

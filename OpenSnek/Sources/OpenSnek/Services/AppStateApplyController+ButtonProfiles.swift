@@ -53,6 +53,16 @@ import OpenSnekCore
 
     func supportsOnboardProfileLightingEditorWrites(device: MouseDevice) -> Bool { supportsOnboardProfileCRUD(device: device) }
 
+    /// For profiles that opt in, built-in effects (Spectrum, Pulse) go to the live lighting and not to the stored profile.
+    func supportsOnboardProfileLightingEffectWrites(device: MouseDevice) -> Bool {
+        supportsOnboardProfileLightingEditorWrites(device: device) && DeviceProfiles.resolve(vendorID: device.vendor_id, productID: device.product_id, transport: device.transport)?.appliesLightingEffectsLiveWithOnboardProfiles == true
+    }
+
+    func currentOnboardProfileEffects(for device: MouseDevice) -> [Int: LightingEffectPatch] {
+        let effect = editorController.currentLightingEffectPatch()
+        return Dictionary(uniqueKeysWithValues: onboardProfileLEDIDs(for: device).map { (Int($0), effect) })
+    }
+
     func onboardProfileLEDIDs(for device: MouseDevice) -> [UInt8] {
         let ids = DeviceProfiles.resolve(vendorID: device.vendor_id, productID: device.product_id, transport: device.transport)?.allUSBLightingLEDIDs ?? [0x01]
         return ids.isEmpty ? [0x01] : ids
