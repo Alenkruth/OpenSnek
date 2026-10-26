@@ -289,6 +289,39 @@ final class DeviceProfilesTests: XCTestCase {
         XCTAssertEqual(baseline.onboardProfileCount, 5)
     }
 
+    func testResolveBluetoothProfileForBasiliskV3Pro35K() throws {
+        let baseline = try XCTUnwrap(DeviceProfiles.resolve(vendorID: 0x068E, productID: 0x00AC, transport: .bluetooth))
+        let phantom = try XCTUnwrap(DeviceProfiles.resolve(vendorID: 0x068E, productID: 0x00D8, transport: .bluetooth))
+        let profile = try XCTUnwrap(DeviceProfiles.resolve(vendorID: 0x068E, productID: 0x00CE, transport: .bluetooth))
+
+        XCTAssertEqual(profile.id, .basiliskV3Pro35KStandard)
+        XCTAssertEqual(profile.productName, "Basilisk V3 Pro 35K")
+        XCTAssertEqual(profile.supportedProducts, [0x00CE])
+        XCTAssertFalse(profile.isLocallyValidated)
+        XCTAssertEqual(profile.passiveDPIInput?.maximumDPI, 35_000)
+        // Same buttons as the V3 Pro, plus the Scroll Mode Toggle (slot 14) and the Profile Button (slot 106), shown read-only.
+        XCTAssertEqual(profile.buttonLayout.visibleSlots.filter { ![14, 106].contains($0.slot) }, baseline.buttonLayout.visibleSlots)
+        // Slots 14 and 106 show their mapping and are read-only, so the writable set matches the V3 Pro.
+        XCTAssertEqual(profile.buttonLayout.writableSlots, baseline.buttonLayout.writableSlots)
+        // The standard 35K adds Spectrum and Pulse. The app applies them to the live lighting only, because the mouse cannot store effects. The V3 Pro stays static-only.
+        XCTAssertEqual(profile.supportedLightingEffects, [.staticColor, .spectrum, .pulseRandom, .pulseSingle])
+        XCTAssertEqual(baseline.supportedLightingEffects, [.staticColor])
+        // Unlike the Phantom Green Edition, the standard 35K has the logo LED.
+        XCTAssertEqual(profile.usbLightingZones.map(\.id), ["scroll_wheel", "logo", "underglow"])
+        XCTAssertEqual(profile.lightingLEDIDs(), [0x01, 0x04, 0x0A])
+        XCTAssertEqual(phantom.lightingLEDIDs(), [0x01, 0x0A])
+        XCTAssertEqual(profile.passiveDPIInput?.profileSwitchPrefixes, baseline.passiveDPIInput?.profileSwitchPrefixes)
+        XCTAssertEqual(profile.supportsIndependentXYDPI, true)
+        XCTAssertEqual(profile.supportsLightingBrightnessControls, true)
+        // Unlike the Phantom Green Edition, this unit answers profile metadata reads, so shared onboard profile support is on.
+        XCTAssertEqual(profile.onboardProfileSupport, .mappedCore)
+        XCTAssertTrue(profile.supportsMappedOnboardProfileCRUD)
+        XCTAssertEqual(profile.onboardProfileCount, 5)
+        // The Phantom Green Edition keeps profile CRUD off because every metadata read is rejected.
+        XCTAssertFalse(phantom.supportsMappedOnboardProfileCRUD)
+        XCTAssertNil(DeviceProfiles.resolve(vendorID: 0x1532, productID: 0x00CE, transport: .usb))
+    }
+
     func testBasiliskV3Pro35KUSBIdentitiesAreNotShippedYet() {
         // Only the Phantom Green Edition Bluetooth path is hardware validated; its USB IDs (0x00D6/0x00D7)
         // and the regular 35K's (0x00CC/0x00CD) stay unclaimed until they are validated.
@@ -564,9 +597,12 @@ final class DeviceProfilesTests: XCTestCase {
 
         let pro35KShorthand = DeviceProfiles.resolveBluetoothFallback(name: "BSKV3P 35K")
         XCTAssertEqual(pro35KShorthand?.id, .basiliskV3Pro35K)
+        // The shorthand stays pinned to the hardware-validated Phantom Green profile rather than the standard 35K.
+        XCTAssertEqual(pro35KShorthand?.supportedProducts, [0x00D8])
+        XCTAssertEqual(DeviceProfiles.resolveBluetoothFallback(name: "Razer Basilisk V3 Pro 35K")?.supportedProducts, [0x00CE])
 
         let pro35KMarketingName = DeviceProfiles.resolveBluetoothFallback(name: "Razer Basilisk V3 Pro 35K")
-        XCTAssertEqual(pro35KMarketingName?.id, .basiliskV3Pro35K)
+        XCTAssertEqual(pro35KMarketingName?.id, .basiliskV3Pro35KStandard)
 
         let phantomGreen = DeviceProfiles.resolveBluetoothFallback(name: "Basilisk V3 Pro 35K Phantom Green Edition")
         XCTAssertEqual(phantomGreen?.id, .basiliskV3Pro35K)

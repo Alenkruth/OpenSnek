@@ -259,13 +259,22 @@ public struct DeviceProfile: Hashable, Sendable {
     /// Separate read targets for devices whose whole-device write address cannot be read.
     public let usbBrightnessReadLEDIDs: [UInt8]?
     public let isLocallyValidated: Bool
+    /// True when the editor offers built-in lighting effects (not only static colors) with onboard profiles. The app applies the effects to the
+    /// live lighting only, because the mouse cannot store them in a profile.
+    public let appliesLightingEffectsLiveWithOnboardProfiles: Bool
+    /// True when the app must read the hardware-active DPI to find the active stage, even with onboard profile support on, because the mouse
+    /// does not send passive DPI reports that follow its DPI button.
+    public let pollsLiveDPIStageWithOnboardProfiles: Bool
+    /// True for profile-mode session behavior that other mice do not use yet: a battery and sleep-timeout read about once each minute,
+    /// no error for the rejected metadata read of the base profile, a read of every visible button slot, and a longer wait for profile-write ACKs.
+    public let usesExtendedProfileSessionHandling: Bool
 
     public init(
         id: DeviceProfileID, productName: String, transport: DeviceTransportKind, supportedProducts: Set<Int>, usbTransactionID: UInt8? = nil, buttonLayout: ButtonSlotLayout, supportsAdvancedLightingEffects: Bool, supportedLightingEffects: [LightingEffectKind] = LightingEffectKind.allCases,
         usbLightingLEDIDs: [UInt8] = [], usbLightingZones: [USBLightingZoneDescriptor] = [], softwareLightingFrameLayout: SoftwareLightingFrameLayout? = nil, supportedSoftwareLightingPresets: [SoftwareLightingPresetID] = [], passiveDPIInput: PassiveDPIInputDescriptor? = nil,
         supportsIndependentXYDPI: Bool = false, supportsScrollModeControls: Bool = false, supportsLightingBrightnessControls: Bool = false, supportsLightingStateReads: Bool = true, usesProjectedDPIStageWriteReadback: Bool = false, onboardProfileSupport: OnboardProfileSupport = .unavailable,
         onboardProfileCount: Int = 1, formFactor: DeviceFormFactor = .mouse, supportsDPIControls: Bool = true, supportsPollRateControls: Bool = true, supportsPowerManagementControls: Bool = true, supportsButtonRemapControls: Bool = true, usbBrightnessLEDIDs: [UInt8]? = nil,
-        usbBrightnessReadLEDIDs: [UInt8]? = nil, isLocallyValidated: Bool = true
+        usbBrightnessReadLEDIDs: [UInt8]? = nil, isLocallyValidated: Bool = true, appliesLightingEffectsLiveWithOnboardProfiles: Bool = false, pollsLiveDPIStageWithOnboardProfiles: Bool = false, usesExtendedProfileSessionHandling: Bool = false
     ) {
         self.id = id
         self.productName = productName
@@ -295,6 +304,9 @@ public struct DeviceProfile: Hashable, Sendable {
         self.usbBrightnessLEDIDs = usbBrightnessLEDIDs
         self.usbBrightnessReadLEDIDs = usbBrightnessReadLEDIDs
         self.isLocallyValidated = isLocallyValidated
+        self.appliesLightingEffectsLiveWithOnboardProfiles = appliesLightingEffectsLiveWithOnboardProfiles
+        self.pollsLiveDPIStageWithOnboardProfiles = pollsLiveDPIStageWithOnboardProfiles
+        self.usesExtendedProfileSessionHandling = usesExtendedProfileSessionHandling
     }
 
     public func matches(vendorID: Int, productID: Int, transport: DeviceTransportKind) -> Bool {
@@ -415,6 +427,16 @@ public enum DeviceProfiles {
         ButtonSlotDescriptor(slot: 53, friendlyName: "Wheel Tilt Right", defaultKind: .scrollRight), ButtonSlotDescriptor(slot: 96, friendlyName: "DPI Button", defaultKind: .default)
     ]
 
+    /// The standard Basilisk V3 Pro 35K has two more buttons than the shared family table: the Scroll Mode Toggle (slot 14,
+    /// factory block `07 01 04`) and the Profile Button (slot 106, factory block `12 01 01`). Both blocks were read from a stored profile
+    /// over Bluetooth. The app shows their mapping and keeps them read-only, as the V3 family documents for these slots.
+    public static let basiliskV3Pro35KBluetoothButtonSlots: [ButtonSlotDescriptor] = (basiliskV3FamilyButtonSlots + [ButtonSlotDescriptor(slot: 14, friendlyName: "Scroll Mode Toggle", defaultKind: .default), ButtonSlotDescriptor(slot: 106, friendlyName: "Profile Button", defaultKind: .default)])
+        .sorted { $0.slot < $1.slot }
+    public static let basiliskV3Pro35KBluetoothReadOnlyButtonSlots: [DocumentedButtonSlot] = [
+        DocumentedButtonSlot(descriptor: ButtonSlotDescriptor(slot: 14, friendlyName: "Scroll Mode Toggle", defaultKind: .default), access: .protocolReadOnly, note: "OpenSnek can see this button, but the mouse does not let apps remap it yet."),
+        DocumentedButtonSlot(descriptor: ButtonSlotDescriptor(slot: 106, friendlyName: "Profile Button", defaultKind: .default), access: .protocolReadOnly, note: "OpenSnek can see this button, but profile-button remap ACK/readback is not stable enough to expose yet.")
+    ]
+
     public static let basiliskV3ProBluetoothButtonSlots = basiliskV3FamilyButtonSlots
     public static let basiliskV335KUSBButtonSlots = basiliskV3FamilyButtonSlots
     public static let basiliskV3ProUSBButtonSlots = basiliskV3FamilyButtonSlots
@@ -479,16 +501,27 @@ public enum DeviceProfiles {
     public static let basiliskV3Pro35KPhantomGreenBluetooth = basiliskV3ProBluetoothFamilyProfile(
         id: .basiliskV3Pro35K, productName: "Basilisk V3 Pro 35K Phantom Green Edition", supportedProducts: [0x00D8], maximumDPI: 35_000, lightingZones: basiliskV3Pro35KPhantomGreenLightingZones, onboardProfileSupport: .unavailable, isLocallyValidated: false)
 
+    // The standard (opaque) Basilisk V3 Pro 35K has the logo LED that the Phantom Green Edition lacks. It keeps the
+    // default scroll wheel, logo, and underglow zones. OpenRazer lists the USB IDs 0x00CC (wired) and 0x00CD
+    // (receiver). OpenSnek maps Bluetooth only. The profile has its own ID. It uses the 35K DPI ceiling, the 0-255 battery scale
+    // and the clutch defaults of the Phantom Green Edition. This unit answers the `03 84` metadata read for stored profiles.
+    // The built-in base profile rejects that read, as on the V3 Pro. Shared mapped onboard profile support is therefore on.
+    public static let basiliskV3Pro35KBluetooth = basiliskV3ProBluetoothFamilyProfile(
+        id: .basiliskV3Pro35KStandard, productName: "Basilisk V3 Pro 35K", supportedProducts: [0x00CE], maximumDPI: 35_000, isLocallyValidated: false, supportedLightingEffects: [.staticColor, .spectrum, .pulseRandom, .pulseSingle], appliesLightingEffectsLiveWithOnboardProfiles: true,
+        buttonSlots: basiliskV3Pro35KBluetoothButtonSlots, documentedButtonSlots: basiliskV3Pro35KBluetoothReadOnlyButtonSlots, writableButtonSlots: basiliskV3FamilyButtonSlots.map(\.slot), pollsLiveDPIStageWithOnboardProfiles: true, usesExtendedProfileSessionHandling: true)
+
     private static func basiliskV3ProBluetoothFamilyProfile(
-        id: DeviceProfileID, productName: String, supportedProducts: Set<Int>, maximumDPI: Int, lightingZones: [USBLightingZoneDescriptor] = basiliskV335KUSBLightingZones, onboardProfileSupport: OnboardProfileSupport = .mappedCore, isLocallyValidated: Bool = true
+        id: DeviceProfileID, productName: String, supportedProducts: Set<Int>, maximumDPI: Int, lightingZones: [USBLightingZoneDescriptor] = basiliskV335KUSBLightingZones, onboardProfileSupport: OnboardProfileSupport = .mappedCore, isLocallyValidated: Bool = true,
+        supportedLightingEffects: [LightingEffectKind] = [.staticColor], appliesLightingEffectsLiveWithOnboardProfiles: Bool = false, buttonSlots: [ButtonSlotDescriptor] = basiliskV3FamilyButtonSlots, documentedButtonSlots: [DocumentedButtonSlot] = basiliskV3ProBluetoothDocumentedReadOnlySlots,
+        writableButtonSlots: [Int]? = nil, pollsLiveDPIStageWithOnboardProfiles: Bool = false, usesExtendedProfileSessionHandling: Bool = false
     ) -> DeviceProfile {
         DeviceProfile(
-            id: id, productName: productName, transport: .bluetooth, supportedProducts: supportedProducts,
-            buttonLayout: ButtonSlotLayout(visibleSlots: basiliskV3FamilyButtonSlots, writableSlots: basiliskV3FamilyButtonSlots.map(\.slot), documentedSlots: basiliskV3ProBluetoothDocumentedReadOnlySlots), supportsAdvancedLightingEffects: false, supportedLightingEffects: [.staticColor],
-            usbLightingLEDIDs: lightingZones.flatMap(\.ledIDs), usbLightingZones: lightingZones,
+            id: id, productName: productName, transport: .bluetooth, supportedProducts: supportedProducts, buttonLayout: ButtonSlotLayout(visibleSlots: buttonSlots, writableSlots: writableButtonSlots ?? buttonSlots.map(\.slot), documentedSlots: documentedButtonSlots),
+            supportsAdvancedLightingEffects: supportedLightingEffects != [.staticColor], supportedLightingEffects: supportedLightingEffects, usbLightingLEDIDs: lightingZones.flatMap(\.ledIDs), usbLightingZones: lightingZones,
             passiveDPIInput: PassiveDPIInputDescriptor(
                 usagePage: 0x01, usage: 0x02, reportID: 0x05, subtype: 0x02, heartbeatSubtype: 0x10, profileSwitchPrefixes: [[0x05, 0x05, 0x39, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]], profileSwitchPreludePrefixes: [[0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]], minInputReportSize: 7,
-                maxFeatureReportSize: 1, maximumDPI: maximumDPI), supportsIndependentXYDPI: true, supportsLightingBrightnessControls: true, onboardProfileSupport: onboardProfileSupport, onboardProfileCount: onboardProfileSupport.isSupported ? 5 : 1, isLocallyValidated: isLocallyValidated)
+                maxFeatureReportSize: 1, maximumDPI: maximumDPI), supportsIndependentXYDPI: true, supportsLightingBrightnessControls: true, onboardProfileSupport: onboardProfileSupport, onboardProfileCount: onboardProfileSupport.isSupported ? 5 : 1, isLocallyValidated: isLocallyValidated,
+            appliesLightingEffectsLiveWithOnboardProfiles: appliesLightingEffectsLiveWithOnboardProfiles, pollsLiveDPIStageWithOnboardProfiles: pollsLiveDPIStageWithOnboardProfiles, usesExtendedProfileSessionHandling: usesExtendedProfileSessionHandling)
     }
 
     public static let orochiV2BluetoothButtonSlots: [ButtonSlotDescriptor] = [
@@ -807,13 +840,19 @@ public enum DeviceProfiles {
         usbBrightnessLEDIDs: [0x00], usbBrightnessReadLEDIDs: mouseDockProUSBBrightnessReadLEDIDs, isLocallyValidated: false)
 
     public static let all: [DeviceProfile] = [
-        basiliskV3XUSB, basiliskV3USB, basiliskV3ProUSB, basiliskV335KUSB, basiliskV3XBluetooth, basiliskV3ProBluetooth, basiliskV3Pro35KPhantomGreenBluetooth, orochiV2Bluetooth, nagaProUSB, nagaProBluetooth, nagaV2ProUSB, nagaV2ProBluetooth, nagaV3ProUSB, nagaV3ProBluetooth, basiliskUSB,
-        lanceheadTEUSB, huntsmanMiniUSB, tartarusProUSB, mouseDockUSB, mouseDockProUSB
+        basiliskV3XUSB, basiliskV3USB, basiliskV3ProUSB, basiliskV335KUSB, basiliskV3XBluetooth, basiliskV3ProBluetooth, basiliskV3Pro35KBluetooth, basiliskV3Pro35KPhantomGreenBluetooth, orochiV2Bluetooth, nagaProUSB, nagaProBluetooth, nagaV2ProUSB, nagaV2ProBluetooth, nagaV3ProUSB,
+        nagaV3ProBluetooth, basiliskUSB, lanceheadTEUSB, huntsmanMiniUSB, tartarusProUSB, mouseDockUSB, mouseDockProUSB
     ]
 
     public static func resolve(vendorID: Int, productID: Int, transport: DeviceTransportKind) -> DeviceProfile? { all.first(where: { $0.matches(vendorID: vendorID, productID: productID, transport: transport) }) }
 
+    /// The run-together name that the Phantom Green Edition advertises. The marketing name of the standard 35K normalizes
+    /// to the same string. This exact advertised string stays pinned to the Phantom Green profile. The PID identifies the
+    /// standard 35K when HID discovery is available.
+    private static let phantomGreenAdvertisedName = "BSKV3P 35K"
+
     public static func resolveBluetoothFallback(name: String?) -> DeviceProfile? {
+        if name?.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(phantomGreenAdvertisedName) == .orderedSame { return basiliskV3Pro35KPhantomGreenBluetooth }
         // The most specific match wins so "BSKV3P 35K" is not claimed by "Basilisk V3 Pro"; ties keep `all` order.
         let ranked = all.filter { $0.transport == .bluetooth }.compactMap { profile in BluetoothNameMatcher.matchRank(name, profile.productName).map { (profile, $0) } }
         return ranked.max(by: { $0.1 < $1.1 })?.0
@@ -825,7 +864,7 @@ public enum DeviceProfiles {
         case .basiliskV3: return 26_000
         case .basiliskV3Pro: return 30_000
         case .basiliskV335K: return 35_000
-        case .basiliskV3Pro35K: return 35_000
+        case .basiliskV3Pro35K, .basiliskV3Pro35KStandard: return 35_000
         case .orochiV2: return 18_000
         case .nagaPro: return 20_000
         case .nagaV2Pro: return 30_000
@@ -942,7 +981,7 @@ public enum DeviceProfiles {
 
     public static func supportsIndependentXYDPI(for profileID: DeviceProfileID?) -> Bool {
         switch profileID {
-        case .basiliskV3, .basiliskV3Pro, .basiliskV335K, .basiliskV3Pro35K, .nagaV3Pro, .basilisk, .lanceheadTournamentEdition: return true
+        case .basiliskV3, .basiliskV3Pro, .basiliskV335K, .basiliskV3Pro35K, .basiliskV3Pro35KStandard, .nagaV3Pro, .basilisk, .lanceheadTournamentEdition: return true
         case .basiliskV3XHyperspeed, .orochiV2, .nagaPro, .nagaV2Pro, .huntsmanMini, .tartarusPro, .mouseDock, .mouseDockPro, nil: return false
         }
     }

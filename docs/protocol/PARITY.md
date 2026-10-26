@@ -9,6 +9,7 @@ Target device baseline:
 - Basilisk V3 (`USB PID 0x0099`, OpenRazer-backed USB profile only)
 - Basilisk V3 Pro (`USB PIDs 0x00AA, 0x00AB`)
 - Basilisk V3 Pro Bluetooth (`BT PID 0x00AC`)
+- Basilisk V3 Pro 35K Bluetooth (`BT PID 0x00CE`, contributor validated)
 - Basilisk V3 Pro 35K Phantom Green Edition Bluetooth (`BT PID 0x00D8`, contributor validated)
 - Basilisk V3 35K (`USB PID 0x00CB`)
 - Orochi V2 Bluetooth (`BT PID 0x0095`)

@@ -418,7 +418,7 @@ Profile-cycle notes:
 - no profile target ID has been decoded from these reports
 - use these reports to trigger an immediate one-shot active-target read, not to directly select a profile from the HID payload
 - this should be event-driven; do not continuously poll the current profile just to notice onboard profile-button changes
-- current V3 Pro BT captures show that known live-target reads (`0B 84 01 00`, `08 84 01 04`) can remain unchanged after firmware-ring profile-button cycles; use `03 82 00 00` for active target identity and `0B 82 00 00` rather than `0B 84 01 00` for active hardware DPI-stage validation
+- current V3 Pro BT captures show that known live-target reads (`0B 84 01 00`, `08 84 01 04`) can remain unchanged after firmware-ring profile-button cycles; use `03 82 00 00` for active target identity and `0B 82 00 00` rather than `0B 84 01 00` for active hardware DPI-stage validation. On the Basilisk V3 Pro 35K with a stored profile active, `0B 84 01 00` stayed on the base profile table and stage when the DPI button cycled. `0B 81 00 00` (the hardware-active DPI scalar, little-endian X, then Y) followed each press. `0B 83 00 00` returned the stage token
 
 Current app policy for passive Bluetooth DPI:
 - subscribe to passive HID DPI reports only on capture-validated Bluetooth profiles
@@ -522,6 +522,43 @@ Profile-scope notes:
 - `10 85 <target> 00` is not the stored brightness getter; target `2`/`3` with
   LED `0x00` returned error status on the tested device.
 
+#### 6.3.4 Custom Frame (`10 04 00 00`)
+
+The contributor probed this payload on a Basilisk V3 Pro 35K (BT PID `0x00CE`) on 2026-10-23 and confirmed the lit LEDs by eye. Other models were not probed.
+
+Write key `10 04 00 00`. This key is also the legacy single-color frame key. The payload has `5 + 3 * cells` bytes:
+
+```text
+04 00 00 <last cell> 00  [R G B] * cells
+```
+
+- The mouse sends ACK `0x02`. The lit zones change to effect `08`. Zone reads `10 83 00 <LED>` then return `08 00 00 ...`.
+- The mouse ignores the start column in the header. Colors always start at cell 0. Each write replaces the full frame. Cells that are not sent go dark.
+- The mouse accepted 14 cells in one 47-byte write (`last cell = 0x0d`).
+- Cell map, confirmed by eye: cell `0` is the logo and cell `1` is the scroll wheel. Cells `2` to `13` are the twelve underglow LEDs. They start at the thumb-rest end on the left and follow the strip. Cells `4` and `5` are close together, and their light blends.
+- The effect list `10 82 00 <LED>` reads `00 01 02 03 05 08` (off, static, breathing, spectrum, reactive, custom frame). The list does not show Wave `04`, but the mouse accepts Wave.
+- Any normal zone write ends custom-frame mode. Examples are a static color and Spectrum `03 00 ...` written to `10 03 00 <LED>`.
+- Reads `10 84 00 00` and `10 81 00 xx` return status `0x03` on this model. A frame cannot be read back.
+
+#### 6.3.5 Built-in Effects Are Live Only
+
+The mouse does not keep built-in effects in a stored profile. Razer staff state that effects need Razer Synapse to run. In a contributor test, a power cycle and a profile change cleared Spectrum and Wave that were written live.
+
+- Stored zone slots (`10 83 <target> <LED>`, targets `2..5`) have the same 10-byte layout as the live zone state. They hold static colors. An unedited slot reads `03 01 28 01 00 ff 00 00 ff 00`, which is an effect-shaped Spectrum.
+- OpenSnek writes an effect to the live lighting (`10 03 00 <LED>`) only.
+- When OpenSnek reads a stored zone, it decodes `03` as Spectrum and `02 <variant>` as Pulse. The Pulse variants are random, single (`RGB1` at bytes `4..6`) and dual (`RGB2` at bytes `7..9`).
+- Brightness stays through sleep. Live zone effects do not stay. After sleep, the zones show the stored state.
+- Spectrum changes smoothly. At brightness `0x33`, Pulse changes in visible steps.
+
+Wave:
+
+- The Wave body is `04 <direction> <speed> <width> 00 ...`. Byte 2 is the speed. A lower value is faster (`0x01` is fastest and `0xFF` is slowest).
+- Byte 3 changes the look. OpenRazer always sends zero. On this unit, `00` is coarse, `01` is less coarse, `03` gives wider bands, and `08` is faster and coarse again. Bytes 4 to 9 did not change the colors.
+- The contributor tested Wave on the underglow by eye. No setting made Wave as smooth as Spectrum. Wave gives each LED a different hue, so adjacent LEDs change in steps. Spectrum fades all LEDs together.
+- OpenRazer (`razer_chroma_extended_matrix_effect_wave`) and the Naga V3 Pro path in this repository fix the speed at `0x28` and expose the direction only.
+- A Wave write to the all-LEDs address (`10 03 00 00`, LED `00`) is accepted. The zone reads for LEDs `01`, `04` and `0A` then show Wave. On the contributor's unit, the logo and scroll wheel changed color after the underglow, and the animation was coarse and fast.
+- OpenSnek does not offer Wave on the Basilisk V3 Pro 35K.
+
 ### 6.4 Lighting Mode Selector Payload
 
 The write payload for key `10 03 00 00` is a `u32 LE`.
@@ -557,6 +594,10 @@ Field meanings:
 - `layer`: `0x00` normal, `0x01` clear-layer payloads
 - `action`: action family
 - `p0`, `p1`, `p2`: action-specific little-endian `u16` values
+
+Media keys use action `0x0A` with length `0x02` and a big-endian HID Consumer usage. Example: `01 05 00 0A 02 00 E9 00 00 00` is Volume Up. On a Basilisk V3 Pro 35K profile, Synapse stored Volume Down (`00 EA`) on slot 4 and Volume Up (`00 E9`) on slot 5. It stored Play/Pause (`00 CD`) on slot 15. In the stored readback, the media block is in the even lane and the factory block is in the odd lane. OpenSnek also maps Next Track (`00 B5`), Previous Track (`00 B6`) and Mute (`00 E2`). These three codes were not tested on hardware.
+
+On the Basilisk V3 Pro 35K, slot `14` is the Scroll Mode Toggle (factory block `07 01 04`). Slot `106` is the Profile Button (factory block `12 01 01`). These are the names that the Basilisk V3 family uses. Slot `6` reads back nothing. The sleep timeout read `05 84 <target> 00` returns the same value for targets `0`, `2` and `3`, and returns nothing for target `1`. The timeout is one global setting. It is not part of a profile.
 
 #### 6.5.1 Validated Action Families
 

@@ -536,6 +536,7 @@ func makeRefactorTestDevice(id: String, transport: DeviceTransportKind, serial: 
     case (.usb, .basiliskV3): productID = 0x0099
     case (.usb, .basiliskV335K): productID = 0x00CB
     case (.bluetooth, .basiliskV3Pro): productID = 0x00AC
+    case (.bluetooth, .basiliskV3Pro35KStandard): productID = 0x00CE
     case (.bluetooth, _): productID = 0x00BA
     default: productID = 0x00AB
     }

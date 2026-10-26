@@ -212,6 +212,17 @@ private struct ProjectedOnboardDPIState {
             editorStore.noteLightingGradientColorsChanged()
         }
 
+        // When all zones of a profile hold a built-in effect, show that effect and not a stale color.
+        if resolvedDeviceProfile(for: device)?.appliesLightingEffectsLiveWithOnboardProfiles == true, snapshot.staticColorByLEDID.isEmpty, let effect = snapshot.effectByLEDID?.sorted(by: { $0.key < $1.key }).first?.value {
+            editorStore.editableLightingEffect = effect.kind
+            editorStore.editableLightingWaveDirection = effect.waveDirection
+            if effect.kind == .pulseSingle || effect.kind == .pulseDual { editorStore.editableColor = rgbColor(from: effect.primary) }
+            if effect.kind == .pulseDual { editorStore.editableSecondaryColor = rgbColor(from: effect.secondary) }
+            lastLightingHydrationKey = "\(device.id)#\(snapshot.profileID)"
+            if onboardProfileLightingColorsByDeviceID.removeValue(forKey: device.id) != nil { editorStore.noteLightingGradientColorsChanged() }
+            return
+        }
+
         let zoneColors = onboardProfileLightingZoneColors(from: snapshot, device: device)
         guard !zoneColors.isEmpty else {
             if onboardProfileLightingColorsByDeviceID.removeValue(forKey: device.id) != nil { editorStore.noteLightingGradientColorsChanged() }

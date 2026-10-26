@@ -29,6 +29,51 @@
         "Profile metadata reads are rejected; profile CRUD stays hidden.",
         "Live Bluetooth settings reset on power cycle; restore-on-connect reapplies them."
       ]
+    },
+    {
+      "profile_id": "basilisk_v3_pro_35k_standard",
+      "transport": "bluetooth",
+      "product_ids": ["0x00CE"],
+      "features": {
+        "dpi_stages": {
+          "status": "contributor_validated",
+          "source": "https://github.com/alenkruth",
+          "evidence": ["captures/ble/2026-10-24-basilisk-v3-pro-35k-standard/README.md"]
+        },
+        "button_remap": {
+          "status": "contributor_validated",
+          "source": "https://github.com/alenkruth",
+          "evidence": ["captures/ble/2026-10-24-basilisk-v3-pro-35k-standard/README.md"]
+        },
+        "lighting_brightness": {
+          "status": "contributor_validated",
+          "source": "https://github.com/alenkruth",
+          "evidence": ["captures/ble/2026-10-24-basilisk-v3-pro-35k-standard/README.md"]
+        },
+        "onboard_profiles": {
+          "status": "contributor_validated",
+          "source": "https://github.com/alenkruth",
+          "evidence": ["captures/ble/2026-10-24-basilisk-v3-pro-35k-standard/README.md"]
+        },
+        "power_management": {
+          "status": "contributor_validated",
+          "source": "https://github.com/alenkruth",
+          "evidence": ["captures/ble/2026-10-24-basilisk-v3-pro-35k-standard/README.md"]
+        },
+        "advanced_lighting_effects": {
+          "status": "contributor_validated",
+          "source": "https://github.com/alenkruth",
+          "evidence": ["captures/ble/2026-10-24-basilisk-v3-pro-35k-standard/README.md"]
+        },
+        "independent_xy": {"status": "not_tested"},
+        "poll_rate": {"status": "unsupported"}
+      },
+      "limitations": [
+        "This capture validates Bluetooth only, not USB identities.",
+        "The app applies Spectrum and Pulse to the live lighting only. The mouse cannot store them. They reset on sleep, a power cycle or a profile change.",
+        "Profile rename failed in testing. Profile create and delete were not tested.",
+        "The OPEN_SNEK_HW hardware-gated tests were not run."
+      ]
     }
   ]
 }

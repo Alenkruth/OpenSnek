@@ -449,6 +449,9 @@ public enum BLEVendorProtocol {
         case .mouseBack: return Data([0x01, slot, 0x00, 0x01, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00])
         case .mouseForward: return Data([0x01, slot, 0x00, 0x01, 0x01, 0x05, 0x00, 0x00, 0x00, 0x00])
         case .keyboardSimple: return Data([0x01, slot, 0x00, 0x02, 0x02, hidModifiers, hidKey ?? 0x04, 0x00, 0x00, 0x00])
+        case .mediaPlayPause, .mediaNextTrack, .mediaPreviousTrack, .mediaVolumeUp, .mediaVolumeDown, .mediaMute:
+            let usage = kind.consumerUsage ?? 0
+            return Data([0x01, slot, 0x00, 0x0A, 0x02, UInt8((usage >> 8) & 0xFF), UInt8(usage & 0xFF), 0x00, 0x00, 0x00])
         case .clearLayer: return Data([0x01, slot, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
         }
     }
@@ -472,6 +475,24 @@ public enum BLEVendorProtocol {
         let effectBytes = Array(buildScrollLEDEffectArgs(effect: effect).dropFirst(2))
         let minimumPayloadLength = 10
         return Data(effectBytes + Array(repeating: 0, count: max(0, minimumPayloadLength - effectBytes.count)))
+    }
+
+    /// Decodes a stored zone state into a built-in effect. The color parser handles static colors, and this function ignores the
+    /// unedited tail bytes of the firmware (`03 01 28 01 ...`). It returns nil for static and unknown effects.
+    public static func parseBluetoothZoneEffect(_ payload: Data) -> LightingEffectPatch? {
+        let bytes = Array(payload)
+        guard bytes.count >= 4 else { return nil }
+        switch bytes[0] {
+        case 0x03: return LightingEffectPatch(kind: .spectrum)
+        case 0x02:
+            func color(_ offset: Int) -> RGBPatch? { bytes.count >= offset + 3 ? RGBPatch(r: Int(bytes[offset]), g: Int(bytes[offset + 1]), b: Int(bytes[offset + 2])) : nil }
+            switch bytes[1] {
+            case 0x01: return color(4).map { LightingEffectPatch(kind: .pulseSingle, primary: $0) }
+            case 0x02: return color(4).flatMap { first in color(7).map { LightingEffectPatch(kind: .pulseDual, primary: first, secondary: $0) } }
+            default: return LightingEffectPatch(kind: .pulseRandom)
+            }
+        default: return nil
+        }
     }
 
     public static func parseLightingLEDIDs(blob: Data) -> [UInt8]? {

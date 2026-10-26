@@ -270,6 +270,10 @@ import OpenSnekCore
             _ = await applyOnboardProfileMutationForCurrentSelection(OnboardProfileMutation(staticColorByLEDID: currentStaticOnboardProfileColors(for: selectedDevice)))
             return
         }
+        if let selectedDevice = deviceStore.selectedDevice, supportsOnboardProfileLightingEffectWrites(device: selectedDevice) {
+            _ = await applyOnboardProfileMutationForCurrentSelection(OnboardProfileMutation(effectByLEDID: currentOnboardProfileEffects(for: selectedDevice)))
+            return
+        }
         enqueueApply(DevicePatch(ledRGB: RGBPatch(r: editorStore.editableColor.r, g: editorStore.editableColor.g, b: editorStore.editableColor.b), usbLightingZoneLEDIDs: editorController.currentUSBLightingZoneLEDIDs()))
     }
 
@@ -293,6 +297,10 @@ import OpenSnekCore
         }
         if editorStore.editableLightingEffect == .staticColor, supportsOnboardProfileLightingEditorWrites(device: selectedDevice) {
             _ = await applyCurrentStaticOnboardProfileColorsIfSupported(for: selectedDevice)
+            return
+        }
+        if supportsOnboardProfileLightingEffectWrites(device: selectedDevice) {
+            _ = await applyOnboardProfileMutationForCurrentSelection(OnboardProfileMutation(effectByLEDID: currentOnboardProfileEffects(for: selectedDevice)))
             return
         }
         enqueueApply(DevicePatch(lightingEffect: editorController.currentLightingEffectPatch(), usbLightingZoneLEDIDs: editorController.currentUSBLightingZoneLEDIDs()))

@@ -33,6 +33,29 @@ final class BridgeClientBluetoothFallbackTests: XCTestCase {
         XCTAssertEqual(BridgeClient.resolveBluetoothBatteryState(device: device, vendorRaw: 255, vendorStatus: 1, usbFallback: nil).percent, 100)
     }
 
+    func testResolveBluetoothBatteryStateScalesStandardBasiliskV3Pro35KRawOn255Scale() {
+        let device = makeBluetoothDevice(productID: 0x00CE, profileID: .basiliskV3Pro35KStandard)
+        XCTAssertEqual(BridgeClient.resolveBluetoothBatteryState(device: device, vendorRaw: 0x7B, vendorStatus: 1, usbFallback: nil).percent, 48)
+        XCTAssertEqual(BridgeClient.resolveBluetoothBatteryState(device: makeBluetoothDevice(productID: 0x00CE, profileID: nil), vendorRaw: 90, vendorStatus: 1, usbFallback: nil).percent, 35)
+    }
+
+    func testZoneStateLightingReadReportsNoColorForBuiltInEffectPayloads() async {
+        let client = BridgeClient(startHIDMonitoring: false)
+        let staticPayload = Data([0x01, 0x00, 0x00, 0x01, 0xBF, 0x00, 0xF2, 0x00, 0x00, 0x00])
+        // Effect-shaped zone reads: documented example, Spectrum (`03`), and Wave (`04 <direction> 28 00`).
+        let effectPayloads = [Data([0x03, 0x01, 0x28, 0x01, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00]), Data([0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]), Data([0x04, 0x01, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])]
+
+        let staticColor = await client.parseLightingRGB(payload: staticPayload, usesZoneState: true)
+        XCTAssertEqual(staticColor, RGBPatch(r: 0xBF, g: 0x00, b: 0xF2))
+        for payload in effectPayloads {
+            let color = await client.parseLightingRGB(payload: payload, usesZoneState: true)
+            XCTAssertNil(color, "effect payload must not be read as RGB: \(payload.map { String(format: "%02x", $0) }.joined())")
+        }
+        // Devices on the legacy frame key keep their existing parsing.
+        let legacy = await client.parseLightingRGB(payload: Data([0x04, 0x00, 0x00, 0x00, 0x00, 0x10, 0x20, 0x30]))
+        XCTAssertEqual(legacy, RGBPatch(r: 0x10, g: 0x20, b: 0x30))
+    }
+
     func testBasiliskV3Pro35KBluetoothUsesZoneStateLighting() async {
         let client = BridgeClient(startHIDMonitoring: false)
         let byProfile = await client.usesBluetoothZoneStateLighting(makeBluetoothDevice(productID: 0x00D8, profileID: .basiliskV3Pro35K))

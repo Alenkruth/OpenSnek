@@ -11,6 +11,13 @@ extension BridgeClient {
         let charging: Bool?
     }
 
+    func resolvedDeviceProfile(for device: MouseDevice) -> DeviceProfile? { DeviceProfiles.resolve(vendorID: device.vendor_id, productID: device.product_id, transport: device.transport) }
+
+    func usesExtendedProfileSessionHandling(_ device: MouseDevice) -> Bool { resolvedDeviceProfile(for: device)?.usesExtendedProfileSessionHandling == true }
+
+    /// Profile writes go to flash. The mouse can acknowledge them slowly on a busy link. Mice that opt in wait longer than for a live exchange.
+    func profileWriteAckTimeout(for device: MouseDevice) -> TimeInterval { usesExtendedProfileSessionHandling(device) ? 2.5 : 0.9 }
+
     /// Whether this Bluetooth device uses the per-zone state lighting surface (`10 83`/`10 03`
     /// color, `10 85`/`10 05` brightness) instead of the legacy single-frame lighting keys.
     func usesBluetoothZoneStateLighting(_ device: MouseDevice) -> Bool {
@@ -49,7 +56,7 @@ extension BridgeClient {
         let profileID = device.profile_id ?? DeviceProfiles.resolve(vendorID: device.vendor_id, productID: device.product_id, transport: device.transport)?.id
         let usesNagaBattery = device.transport == .bluetooth && profileID?.usesNagaBluetoothBatteryTelemetry == true
         // The V3 Pro 35K reported raw 0x7B over Bluetooth, so its byte is on the 0-255 scale even below 100.
-        let isV3Pro35KBluetooth = device.transport == .bluetooth && (device.profile_id == .basiliskV3Pro35K || device.product_id == 0x00D8)
+        let isV3Pro35KBluetooth = device.transport == .bluetooth && (profileID == .basiliskV3Pro35K || profileID == .basiliskV3Pro35KStandard || device.product_id == 0x00D8)
         let vendorPercent = vendorRaw.map { raw in
             if isV3XBluetooth { return Int((Double(min(max(raw, 0), 255)) / 255.0 * 100.0).rounded()) }
             return (usesNagaBattery || isV3Pro35KBluetooth || raw > 100) ? Int((Double(raw) / 255.0) * 100.0) : raw
@@ -95,7 +102,7 @@ extension BridgeClient {
             AppLog.debug("Bridge", "btReadLightingColor no-payload device=\(device.id) led=0x\(String(format: "%02x", ledID)) req=\(req) notifies=\(btNotifySummary(notifies))")
             return nil
         }
-        let parsed = parseLightingRGB(payload: payload)
+        let parsed = parseLightingRGB(payload: payload, usesZoneState: usesBluetoothZoneStateLighting(device) && resolvedDeviceProfile(for: device)?.appliesLightingEffectsLiveWithOnboardProfiles == true)
         if let parsed {
             AppLog.debug("Bridge", "btReadLightingColor device=\(device.id) led=0x\(String(format: "%02x", ledID)) rgb=(\(parsed.r),\(parsed.g),\(parsed.b))")
         } else {
@@ -122,15 +129,26 @@ extension BridgeClient {
                 ?? btDpiSnapshotByDeviceID[device.id].map { snapshot in BLEVendorProtocol.DpiStagesRead(active: snapshot.active, count: snapshot.count, values: Array(snapshot.slots.prefix(snapshot.count)), pairs: Array(snapshot.pairs.prefix(snapshot.count)), marker: snapshot.marker) }
         }
         let shouldPollGenericTelemetry = Self.shouldPollBluetoothGenericTelemetryForReadState(supportsMappedOnboardProfiles: supportsMappedOnboardProfiles)
+        // Profile-enabled mice skip the telemetry sweep on each refresh, because profile reads supply DPI and lighting.
+        // Battery and sleep timeout need an occasional read, or they do not appear.
+        let refreshesPowerTelemetry = !shouldPollGenericTelemetry && usesExtendedProfileSessionHandling(device) && Self.bluetoothMappedPowerTelemetryIsDue(lastReadAt: btMappedPowerTelemetryReadAtByDeviceID[device.id], now: Date())
+        let previousState = lastStateByDeviceID[device.id]
         let batteryRaw: Int?
         let batteryStatus: Int?
         let lighting: Int?
         let sleepTimeout: Int?
         if !shouldPollGenericTelemetry {
-            batteryRaw = nil
-            batteryStatus = nil
+            if refreshesPowerTelemetry {
+                batteryRaw = (try? await btGetScalar(device: device, key: .batteryRaw, size: 1)) ?? nil
+                batteryStatus = (try? await btGetScalar(device: device, key: .batteryStatus, size: 1)) ?? nil
+                sleepTimeout = (try? await btGetScalar(device: device, key: .powerTimeoutGet, size: 2)) ?? nil
+                btMappedPowerTelemetryReadAtByDeviceID[device.id] = Date()
+            } else {
+                batteryRaw = nil
+                batteryStatus = nil
+                sleepTimeout = nil
+            }
             lighting = nil
-            sleepTimeout = nil
         } else {
             batteryRaw = (try? await btGetScalar(device: device, key: .batteryRaw, size: 1)) ?? nil
             batteryStatus = (try? await btGetScalar(device: device, key: .batteryStatus, size: 1)) ?? nil
@@ -143,17 +161,24 @@ extension BridgeClient {
         let batteryState = Self.resolveBluetoothBatteryState(device: device, vendorRaw: batteryRaw, vendorStatus: batteryStatus, usbFallback: usbBatteryFallback)
 
         return MouseState(
-            device: DeviceSummary(id: device.id, product_name: device.product_name, serial: device.serial, transport: device.transport, firmware: nil), connection: "Bluetooth", battery_percent: batteryState.percent, charging: batteryState.charging,
+            device: DeviceSummary(id: device.id, product_name: device.product_name, serial: device.serial, transport: device.transport, firmware: nil), connection: "Bluetooth", battery_percent: batteryState.percent ?? (shouldPollGenericTelemetry ? nil : previousState?.battery_percent),
+            charging: batteryState.charging ?? (shouldPollGenericTelemetry ? nil : previousState?.charging),
             dpi: {
                 guard let active = btStages?.active, let values = btStages?.values, active >= 0, active < values.count else { return nil }
                 if let pairs = btStages?.pairs, active < pairs.count { return pairs[active] }
                 let value = values[active]
                 return DpiPair(x: value, y: value)
-            }(), dpi_stages: DpiStages(active_stage: btStages?.active, values: btStages?.values, pairs: btStages?.pairs), poll_rate: nil, sleep_timeout: sleepTimeout, device_mode: nil, active_onboard_profile: activeOnboardProfile,
+            }(), dpi_stages: DpiStages(active_stage: btStages?.active, values: btStages?.values, pairs: btStages?.pairs), poll_rate: nil, sleep_timeout: sleepTimeout ?? (shouldPollGenericTelemetry ? nil : previousState?.sleep_timeout), device_mode: nil, active_onboard_profile: activeOnboardProfile,
             onboard_profile_count: profile?.supportsMappedOnboardProfileCRUD == true ? profile?.onboardProfileCount : nil, led_value: lighting, capabilities: Capabilities(dpi_stages: true, poll_rate: false, power_management: true, button_remap: true, lighting: supportsLighting))
     }
 
     nonisolated static func shouldPollBluetoothGenericTelemetryForReadState(supportsMappedOnboardProfiles: Bool) -> Bool { !supportsMappedOnboardProfiles }
+
+    /// Mice that opt in read battery and sleep timeout about once each minute. The previous values stay between reads.
+    nonisolated static func bluetoothMappedPowerTelemetryIsDue(lastReadAt: Date?, now: Date, interval: TimeInterval = 60) -> Bool {
+        guard let lastReadAt else { return true }
+        return now.timeIntervalSince(lastReadAt) >= interval
+    }
 
     func buildBluetoothDeltaState(device: MouseDevice, includeDpi: Bool, includeLighting: Bool, includePower: Bool) async throws -> MouseState {
         let supportsLighting = device.showsLightingControls
@@ -240,6 +265,12 @@ extension BridgeClient {
             if header.req == req { return header.status == 0x02 }
         }
         return false
+    }
+
+    /// The hardware-active DPI (`0B 81 00 00`) follows the DPI button when any profile is active.
+    func btReadLiveDPIPair(device: MouseDevice) async throws -> DpiPair? {
+        guard let payload = try await btReadPayload(device: device, key: .dpiScalarGet(target: 0)) else { return nil }
+        return BLEVendorProtocol.parseDpiScalarPair(blob: payload)
     }
 
     func btGetDpiStages(device: MouseDevice) async throws -> BLEVendorProtocol.DpiStagesRead? {
@@ -383,10 +414,13 @@ extension BridgeClient {
         return true
     }
 
-    func parseLightingRGB(payload: Data) -> RGBPatch? {
+    func parseLightingRGB(payload: Data, usesZoneState: Bool = false) -> RGBPatch? {
         guard !payload.isEmpty else { return nil }
 
         if let zoneState = BLEVendorProtocol.parseV3ProLightingZoneStatePayload(payload) { return zoneState }
+        // A zone that runs a built-in effect returns an effect-shaped payload and not a static color.
+        // The legacy layouts below would read the effect bytes as RGB. Report no color instead.
+        if usesZoneState { return nil }
         if payload.count >= 8, payload[0] == 0x04 { return RGBPatch(r: Int(payload[5]), g: Int(payload[6]), b: Int(payload[7])) }
         if payload.count >= 4 { return RGBPatch(r: Int(payload[1]), g: Int(payload[2]), b: Int(payload[3])) }
         return nil

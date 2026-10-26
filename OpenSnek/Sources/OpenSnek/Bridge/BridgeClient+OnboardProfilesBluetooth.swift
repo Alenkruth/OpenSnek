@@ -49,16 +49,17 @@ extension BridgeClient {
         let metadata: OnboardProfileMetadata
         if !includeMetadata {
             metadata = OnboardProfileMetadata(name: target == 0 ? "Active Profile" : "Profile \(target)")
-        } else if target == 0 {
-            metadata = (try? await btReadOnboardProfileMetadata(device: device, target: target)) ?? OnboardProfileMetadata(name: "Active Profile")
+        } else if target == 0 || (target == 1 && profile.usesExtendedProfileSessionHandling) {
+            // The mouse rejects metadata reads for the built-in base profile. A failed read is not an error.
+            metadata = (try? await btReadOnboardProfileMetadata(device: device, target: target)) ?? OnboardProfileMetadata(name: target == 0 ? "Active Profile" : "Base Profile")
         } else {
             metadata = try await btReadOnboardProfileMetadata(device: device, target: target)
         }
         let dpi = try await btReadOnboardProfileDPI(device: device, target: target)
         let bindings = includeButtonBindings ? try await btReadOnboardProfileButtons(device: device, profile: profile, target: target) : [:]
         let brightness = try await btReadOnboardProfileBrightness(device: device, target: target)
-        let colors = try await btReadOnboardProfileStaticColors(device: device, target: target)
-        return OnboardProfileSnapshot(profileID: target, metadata: metadata, dpi: dpi, buttonBindings: bindings, brightnessByLEDID: brightness, staticColorByLEDID: colors, hasFetchedMetadata: includeMetadata)
+        let lighting = try await btReadOnboardProfileLighting(device: device, target: target)
+        return OnboardProfileSnapshot(profileID: target, metadata: metadata, dpi: dpi, buttonBindings: bindings, brightnessByLEDID: brightness, staticColorByLEDID: lighting.colors, effectByLEDID: lighting.effects.isEmpty ? nil : lighting.effects, hasFetchedMetadata: includeMetadata)
     }
 
     func btReadOnboardProfileMetadata(device: MouseDevice, target: Int, requireKnownFields: Bool = false) async throws -> OnboardProfileMetadata {
@@ -129,7 +130,9 @@ extension BridgeClient {
 
     func btReadOnboardProfileButtons(device: MouseDevice, profile: DeviceProfile, target: Int) async throws -> [Int: ButtonBindingDraft] {
         var bindings: [Int: ButtonBindingDraft] = [:]
-        for slot in profile.buttonLayout.writableSlots {
+        // Read every visible slot, including read-only slots, so each button shows its mapping. The app writes editable slots only.
+        let slotsToRead = profile.usesExtendedProfileSessionHandling ? profile.buttonLayout.visibleSlots.map(\.slot) : profile.buttonLayout.writableSlots
+        for slot in slotsToRead {
             guard let payload = try await btReadPayload(device: device, key: .buttonBindGet(target: UInt8(target), slot: UInt8(slot))), let block = BLEVendorProtocol.extractBluetoothFunctionBlock(payload: payload, target: UInt8(target), slot: UInt8(slot), profileID: device.profile_id),
                 let draft = ButtonBindingSupport.buttonBindingDraftFromUSBFunctionBlock(slot: slot, functionBlock: block, profileID: device.profile_id)
             else { continue }
@@ -147,13 +150,15 @@ extension BridgeClient {
         return values
     }
 
-    func btReadOnboardProfileStaticColors(device: MouseDevice, target: Int) async throws -> [Int: RGBPatch] {
-        var values: [Int: RGBPatch] = [:]
+    /// Reads the stored zone state of each LED once. The result is a static color or a built-in effect.
+    func btReadOnboardProfileLighting(device: MouseDevice, target: Int) async throws -> (colors: [Int: RGBPatch], effects: [Int: LightingEffectPatch]) {
+        var colors: [Int: RGBPatch] = [:]
+        var effects: [Int: LightingEffectPatch] = [:]
         for ledID in bluetoothLightingLEDIDs(device: device) {
-            guard let payload = try await btReadPayload(device: device, key: .profileLightingZoneStateGet(target: UInt8(target), ledID: ledID)), let color = BLEVendorProtocol.parseV3ProLightingZoneStatePayload(payload) else { continue }
-            values[Int(ledID)] = color
+            guard let payload = try await btReadPayload(device: device, key: .profileLightingZoneStateGet(target: UInt8(target), ledID: ledID)) else { continue }
+            if let color = BLEVendorProtocol.parseV3ProLightingZoneStatePayload(payload) { colors[Int(ledID)] = color } else if let effect = BLEVendorProtocol.parseBluetoothZoneEffect(payload) { effects[Int(ledID)] = effect }
         }
-        return values
+        return (colors, effects)
     }
 
     func btCreateOnboardProfilePrelude(device: MouseDevice, target: Int) async throws {
@@ -177,19 +182,51 @@ extension BridgeClient {
                         slot: UInt8(slot), kind: draft.kind, hidKey: UInt8(max(0, min(255, draft.hidKey))), hidModifiers: UInt8(max(0, min(255, draft.hidModifiers))), turboEnabled: draft.turboEnabled && draft.kind.supportsTurbo,
                         turboRate: UInt16(ButtonBindingSupport.clampTurboRate(draft.turboRate)), clutchDPI: draft.kind == .dpiClutch ? DeviceProfiles.clampDPI(draft.clutchDPI ?? ButtonBindingSupport.defaultBasiliskDPIClutchDPI, device: device) : nil, profileID: device.profile_id),
                     target: UInt8(target), slot: UInt8(slot))
-                guard try await btWriteAck(device: device, key: .buttonBindSet(target: UInt8(target), slot: UInt8(slot)), payload: payload) else { throw BridgeError.commandFailed("Bluetooth onboard profile button write failed for slot \(slot).") }
+                guard try await btWriteAck(device: device, key: .buttonBindSet(target: UInt8(target), slot: UInt8(slot)), payload: payload, timeout: profileWriteAckTimeout(for: device)) else { throw BridgeError.commandFailed("Bluetooth onboard profile button write failed for slot \(slot).") }
             }
         }
         if let brightnessByLEDID = mutation.brightnessByLEDID, !brightnessByLEDID.isEmpty {
-            guard try await btWriteAck(device: device, key: .profileTargetPrepare(target: UInt8(target)), payload: Data([0x00])) else { throw BridgeError.commandFailed("Bluetooth onboard profile brightness prepare failed.") }
+            guard try await btWriteAck(device: device, key: .profileTargetPrepare(target: UInt8(target)), payload: Data([0x00]), timeout: profileWriteAckTimeout(for: device)) else { throw BridgeError.commandFailed("Bluetooth onboard profile brightness prepare failed.") }
             let brightness = brightnessByLEDID.values.max() ?? 0
-            guard try await btWriteAck(device: device, key: .storedLightingBrightnessSet(target: UInt8(target)), payload: Data([UInt8(max(0, min(255, brightness)))])) else { throw BridgeError.commandFailed("Bluetooth onboard profile brightness write failed.") }
+            guard try await btWriteAck(device: device, key: .storedLightingBrightnessSet(target: UInt8(target)), payload: Data([UInt8(max(0, min(255, brightness)))]), timeout: profileWriteAckTimeout(for: device)) else {
+                throw BridgeError.commandFailed("Bluetooth onboard profile brightness write failed.")
+            }
         }
         if let colors = mutation.staticColorByLEDID {
             for (ledID, color) in colors {
                 let payload = BLEVendorProtocol.buildV3ProLightingZoneStatePayload(r: color.r, g: color.g, b: color.b)
-                guard try await btWriteAck(device: device, key: .profileLightingZoneStateSet(target: UInt8(target), ledID: UInt8(ledID)), payload: payload) else { throw BridgeError.commandFailed("Bluetooth onboard profile static color write failed for LED \(ledID).") }
+                guard try await btWriteAck(device: device, key: .profileLightingZoneStateSet(target: UInt8(target), ledID: UInt8(ledID)), payload: payload, timeout: profileWriteAckTimeout(for: device)) else {
+                    throw BridgeError.commandFailed("Bluetooth onboard profile static color write failed for LED \(ledID).")
+                }
             }
+        }
+    }
+
+    /// The app does not write built-in effects into a stored profile, because the mouse cannot keep them. They go to the live lighting only.
+    /// A stored-profile lighting write does not change the live lights until the profile is activated again.
+    /// When the edited profile is the active profile, this function also writes the edit to the hardware-active layer.
+    /// The stored write has already succeeded. A failed live color or brightness write is logged and does not fail the edit.
+    func btProjectOnboardProfileLightingToActiveLayer(device: MouseDevice, target: Int, mutation: OnboardProfileMutation) async throws {
+        guard mutation.brightnessByLEDID != nil || mutation.staticColorByLEDID != nil || mutation.effectByLEDID != nil else { return }
+        guard let active = try? await btReadActiveOnboardProfileID(device: device), active == target else { return }
+        do {
+            for (ledID, brightness) in mutation.brightnessByLEDID ?? [:] {
+                guard try await btWriteAck(device: device, key: .lightingBrightnessSet(ledID: UInt8(ledID)), payload: Data([UInt8(max(0, min(255, brightness)))]), timeout: profileWriteAckTimeout(for: device)) else {
+                    throw BridgeError.commandFailed("Live brightness write was rejected for LED \(ledID).")
+                }
+            }
+            for (ledID, color) in mutation.staticColorByLEDID ?? [:] {
+                let payload = BLEVendorProtocol.buildV3ProLightingZoneStatePayload(r: color.r, g: color.g, b: color.b)
+                guard try await btWriteAck(device: device, key: .lightingZoneStateSet(ledID: UInt8(ledID)), payload: payload, timeout: profileWriteAckTimeout(for: device)) else { throw BridgeError.commandFailed("Live static color write was rejected for LED \(ledID).") }
+            }
+            for (ledID, effect) in mutation.effectByLEDID ?? [:] {
+                let payload = BLEVendorProtocol.buildBluetoothZoneEffectPayload(effect: effect)
+                guard try await btWriteAck(device: device, key: .lightingZoneStateSet(ledID: UInt8(ledID)), payload: payload, timeout: profileWriteAckTimeout(for: device)) else { throw BridgeError.commandFailed("Live lighting effect write was rejected for LED \(ledID).") }
+            }
+        } catch {
+            // An effect reaches the live lighting only, so its failure fails the edit. Colors and brightness are already stored.
+            if mutation.effectByLEDID != nil { throw error }
+            AppLog.warning("Bridge", "live lighting projection failed device=\(device.id) profile=\(target): \(error.localizedDescription)")
         }
     }
 

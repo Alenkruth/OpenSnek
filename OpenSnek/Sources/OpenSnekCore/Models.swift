@@ -35,6 +35,7 @@ public enum DeviceProfileID: String, Codable, Hashable, Sendable {
     case basiliskV3Pro = "basilisk_v3_pro"
     case basiliskV335K = "basilisk_v3_35k"
     case basiliskV3Pro35K = "basilisk_v3_pro_35k"
+    case basiliskV3Pro35KStandard = "basilisk_v3_pro_35k_standard"
     case orochiV2 = "orochi_v2"
     case nagaPro = "naga_pro"
     case nagaV2Pro = "naga_v2_pro"
@@ -60,7 +61,7 @@ extension DeviceProfileID {
     /// Per-zone BLE lighting uses state keys instead of the legacy single-frame color key.
     public var usesBluetoothZoneStateLighting: Bool {
         switch self {
-        case .basiliskV3Pro, .basiliskV3Pro35K, .nagaV2Pro, .nagaV3Pro: return true
+        case .basiliskV3Pro, .basiliskV3Pro35K, .basiliskV3Pro35KStandard, .nagaV2Pro, .nagaV3Pro: return true
         default: return false
         }
     }
@@ -77,7 +78,7 @@ extension DeviceProfileID {
     /// factory button blocks, and onboard-profile support live on the device profile instead.
     public var isBasiliskV3ProFamily: Bool {
         switch self {
-        case .basiliskV3Pro, .basiliskV3Pro35K: return true
+        case .basiliskV3Pro, .basiliskV3Pro35K, .basiliskV3Pro35KStandard: return true
         case .basiliskV3XHyperspeed, .basiliskV3, .basiliskV335K, .orochiV2, .nagaPro, .nagaV2Pro, .nagaV3Pro, .basilisk, .lanceheadTournamentEdition, .huntsmanMini, .tartarusPro, .mouseDock, .mouseDockPro: return false
         }
     }
@@ -572,8 +573,46 @@ public enum ButtonBindingKind: String, CaseIterable, Identifiable, Codable, Send
     case mouseForward = "mouse_forward"
     case keyboardSimple = "keyboard_simple"
     case clearLayer = "clear_layer"
+    case mediaPlayPause = "media_play_pause"
+    case mediaNextTrack = "media_next_track"
+    case mediaPreviousTrack = "media_previous_track"
+    case mediaVolumeUp = "media_volume_up"
+    case mediaVolumeDown = "media_volume_down"
+    case mediaMute = "media_mute"
 
     public var id: String { rawValue }
+
+    /// USB HID Consumer-page usage (class `0x0A` function block, big-endian) for the media kinds. The Volume Up and
+    /// Volume Down values match the values that Synapse stored on the side buttons of a Basilisk V3 Pro 35K (`00 E9` and `00 EA`).
+    public var consumerUsage: UInt16? {
+        switch self {
+        case .mediaPlayPause: return 0x00CD
+        case .mediaNextTrack: return 0x00B5
+        case .mediaPreviousTrack: return 0x00B6
+        case .mediaVolumeUp: return 0x00E9
+        case .mediaVolumeDown: return 0x00EA
+        case .mediaMute: return 0x00E2
+        default: return nil
+        }
+    }
+
+    public static func mediaKind(forConsumerUsage usage: UInt16) -> ButtonBindingKind? { allCases.first { $0.consumerUsage == usage } }
+
+    /// True for the HID Consumer (media) functions. The editor shows them in the keyboard category.
+    public var isMediaKey: Bool { consumerUsage != nil }
+
+    /// Short name used inside the keyboard category's media chooser.
+    public var mediaLabel: String {
+        switch self {
+        case .mediaPlayPause: return "Play/Pause"
+        case .mediaNextTrack: return "Next Track"
+        case .mediaPreviousTrack: return "Previous Track"
+        case .mediaVolumeUp: return "Volume Up"
+        case .mediaVolumeDown: return "Volume Down"
+        case .mediaMute: return "Mute"
+        default: return label
+        }
+    }
 
     public var label: String {
         switch self {
@@ -591,13 +630,19 @@ public enum ButtonBindingKind: String, CaseIterable, Identifiable, Codable, Send
         case .mouseForward: return "Mouse Forward"
         case .keyboardSimple: return "Keyboard Key"
         case .clearLayer: return "Disabled"
+        case .mediaPlayPause: return "Media: Play/Pause"
+        case .mediaNextTrack: return "Media: Next Track"
+        case .mediaPreviousTrack: return "Media: Previous Track"
+        case .mediaVolumeUp: return "Media: Volume Up"
+        case .mediaVolumeDown: return "Media: Volume Down"
+        case .mediaMute: return "Media: Mute"
         }
     }
 
     public var supportsTurbo: Bool {
         switch self {
         case .leftClick, .rightClick, .middleClick, .scrollUp, .scrollDown, .scrollLeft, .scrollRight, .mouseBack, .mouseForward, .keyboardSimple: return true
-        case .default, .dpiCycle, .dpiClutch, .clearLayer: return false
+        case .default, .dpiCycle, .dpiClutch, .clearLayer, .mediaPlayPause, .mediaNextTrack, .mediaPreviousTrack, .mediaVolumeUp, .mediaVolumeDown, .mediaMute: return false
         }
     }
 }

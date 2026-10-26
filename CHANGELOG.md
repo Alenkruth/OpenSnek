@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+- Added contributor-validated Razer Basilisk V3 Pro 35K support over Bluetooth (`0x00CE`). The app supports DPI stages up to 35,000, the DPI button, battery and sleep timeout. The mouse has three lighting zones (scroll wheel, logo, underglow). Button remap and onboard profile management are available. Each button shows its mapped function. Media functions (play/pause, next and previous track, volume up and down, mute) are in the keyboard category. The Scroll Mode Toggle and the Profile Button are read-only. The selected profile stores static colors and brightness. Spectrum and Pulse apply to the live lighting only, because the mouse cannot store effects. Profile rename failed in testing.
+
+### Changed
+- Changed the Bluetooth name fallback for `Razer Basilisk V3 Pro 35K` to resolve to the standard 35K profile and not to the Phantom Green Edition profile.
+
 ## [1.4.1-rc.2]
 
 ### Added

@@ -534,7 +534,7 @@ private struct ButtonBindingRow: View {
         }.padding(8).opacity(row.isEditable ? 1.0 : 0.75).background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.04)).overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1)))
     }
 
-    @ViewBuilder private var keyboardSection: some View { if row.selectedKind == .keyboardSimple { ButtonBindingKeyboardControls(editorStore: editorStore, row: row) } }
+    @ViewBuilder private var keyboardSection: some View { if row.selectedKind == .keyboardSimple || row.selectedKind.isMediaKey { ButtonBindingKeyboardControls(editorStore: editorStore, row: row) } }
 
     @ViewBuilder private func dpiClutchSection(profileID: DeviceProfileID?) -> some View { if row.selectedKind == .dpiClutch { ButtonBindingDpiClutchControls(editorStore: editorStore, row: row, profileID: profileID) } }
 
@@ -549,30 +549,57 @@ private struct ButtonBindingHeaderRow: View {
     let row: ButtonBindingRowModel
     let profileID: DeviceProfileID?
 
+    private static func categoryKind(for kind: ButtonBindingKind) -> ButtonBindingKind { kind.isMediaKey ? .keyboardSimple : kind }
+
+    /// The "Default" option names the factory function (for example "Default: Middle Click"), so the row shows the button function.
+    private func optionLabel(for kind: ButtonBindingKind) -> String {
+        guard kind == .default, let function = ButtonBindingSupport.defaultFunctionLabel(for: row.slot, profileID: profileID) else { return kind.label }
+        return "Default: \(function)"
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             Text(row.friendlyName).font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(.white).accessibilityIdentifier("button-binding-row-\(row.slot)")
 
             Spacer(minLength: 12)
 
-            Picker("", selection: Binding(get: { editorStore.buttonBindingKind(for: row.slot) }, set: { editorStore.updateButtonBindingKind(slot: row.slot, kind: $0) })) {
-                ForEach(ButtonBindingSupport.availableButtonBindingKinds(for: row.slot, profileID: profileID)) { kind in Text(kind.label).tag(kind) }
+            // Media functions are in the keyboard category. The top-level list omits them and shows the keyboard category for them.
+            Picker("", selection: Binding(get: { Self.categoryKind(for: editorStore.buttonBindingKind(for: row.slot)) }, set: { editorStore.updateButtonBindingKind(slot: row.slot, kind: $0) })) {
+                ForEach(ButtonBindingSupport.availableButtonBindingKinds(for: row.slot, profileID: profileID).filter { !$0.isMediaKey }) { kind in Text(optionLabel(for: kind)).tag(kind) }
             }.labelsHidden().pickerStyle(.menu).frame(width: 220, alignment: .trailing).disabled(!row.isEditable).accessibilityIdentifier("button-binding-kind-picker-\(row.slot)")
         }
     }
 }
 
-/// Renders the button binding keyboard controls UI.
+/// Renders the button binding keyboard controls UI: a key or shortcut, or (where offered) a media function.
 private struct ButtonBindingKeyboardControls: View {
     let editorStore: EditorStore
     let row: ButtonBindingRowModel
 
+    private var mediaKinds: [ButtonBindingKind] { ButtonBindingSupport.availableButtonBindingKinds(for: row.slot, profileID: editorStore.selectedDeviceProfileID).filter(\.isMediaKey) }
+
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Spacer()
-            KeyboardBindingEditor(hidKey: row.keyboardHidKey, hidModifiers: row.keyboardHidModifiers, supportsModifierChords: row.supportsKeyboardModifierChords, isEditable: row.isEditable) { selection in
-                editorStore.updateButtonBindingKeyboardShortcut(slot: row.slot, hidKey: selection.hidKey, hidModifiers: selection.hidModifiers)
+        VStack(alignment: .trailing, spacing: 8) {
+            if !mediaKinds.isEmpty { functionChooser }
+            if !row.selectedKind.isMediaKey {
+                HStack(alignment: .center, spacing: 12) {
+                    Spacer()
+                    KeyboardBindingEditor(hidKey: row.keyboardHidKey, hidModifiers: row.keyboardHidModifiers, supportsModifierChords: row.supportsKeyboardModifierChords, isEditable: row.isEditable) { selection in
+                        editorStore.updateButtonBindingKeyboardShortcut(slot: row.slot, hidKey: selection.hidKey, hidModifiers: selection.hidModifiers)
+                    }
+                }
             }
+        }
+    }
+
+    private var functionChooser: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Spacer()
+            Text("Function").font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white.opacity(0.72))
+            Picker("", selection: Binding(get: { editorStore.buttonBindingKind(for: row.slot).isMediaKey ? editorStore.buttonBindingKind(for: row.slot) : .keyboardSimple }, set: { editorStore.updateButtonBindingKind(slot: row.slot, kind: $0) })) {
+                Text("Key / Shortcut").tag(ButtonBindingKind.keyboardSimple)
+                ForEach(mediaKinds) { kind in Text(kind.mediaLabel).tag(kind) }
+            }.labelsHidden().pickerStyle(.menu).frame(width: 220, alignment: .trailing).disabled(!row.isEditable).accessibilityIdentifier("button-binding-function-picker-\(row.slot)")
         }
     }
 }

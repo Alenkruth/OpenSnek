@@ -113,7 +113,7 @@ public enum ButtonBindingSupport {
 
     private static func isBasiliskV3Family(_ profileID: DeviceProfileID?) -> Bool {
         switch profileID {
-        case .basiliskV3, .basiliskV3Pro, .basiliskV335K, .basiliskV3Pro35K: return true
+        case .basiliskV3, .basiliskV3Pro, .basiliskV335K, .basiliskV3Pro35K, .basiliskV3Pro35KStandard: return true
         case .basiliskV3XHyperspeed, .orochiV2, .nagaPro, .nagaV2Pro, .nagaV3Pro, .basilisk, .lanceheadTournamentEdition, .huntsmanMini, .tartarusPro, .mouseDock, .mouseDockPro, .none: return false
         }
     }
@@ -128,7 +128,7 @@ public enum ButtonBindingSupport {
 
     public static func defaultDPIClutchDPI(for profileID: DeviceProfileID?) -> Int? {
         switch profileID {
-        case .basiliskV3, .basiliskV3Pro, .basiliskV335K, .basiliskV3Pro35K: return defaultBasiliskDPIClutchDPI
+        case .basiliskV3, .basiliskV3Pro, .basiliskV335K, .basiliskV3Pro35K, .basiliskV3Pro35KStandard: return defaultBasiliskDPIClutchDPI
         case .basiliskV3XHyperspeed, .orochiV2, .nagaPro, .nagaV2Pro, .nagaV3Pro, .basilisk, .lanceheadTournamentEdition, .huntsmanMini, .tartarusPro, .mouseDock, .mouseDockPro, .none: return nil
         }
     }
@@ -142,6 +142,18 @@ public enum ButtonBindingSupport {
 
     public static func supportsDefaultRestore(for slot: Int, profileID: DeviceProfileID? = nil) -> Bool { defaultUSBFunctionBlock(for: slot, profileID: profileID) != nil }
 
+    /// The function of a factory-default binding. The editor shows it as "Default: Middle Click" and not as "Default".
+    public static func defaultFunctionLabel(for slot: Int, profileID: DeviceProfileID? = nil) -> String? {
+        if let semantic = semanticDefaultButtonBinding(for: slot, profileID: profileID), semantic.kind != .default { return semantic.kind.label }
+        // These two read-only buttons have no remappable kind. Their factory function is the button itself.
+        if profileID == .basiliskV3Pro35KStandard {
+            if slot == 14 { return "Scroll Mode Toggle" }
+            if slot == 106 { return "Profile Button" }
+        }
+        if let descriptorKind = buttonSlotDescriptors(for: profileID).first(where: { $0.slot == slot })?.defaultKind, descriptorKind != .default { return descriptorKind.label }
+        return nil
+    }
+
     public static func completeDefaultUSBFunctionBlocks(for slots: [Int], profileID: DeviceProfileID? = nil) -> [Int: [UInt8]]? {
         let blocks = slots.reduce(into: [Int: [UInt8]]()) { result, slot in result[slot] = defaultUSBFunctionBlock(for: slot, profileID: profileID) }
         return blocks.count == Set(slots).count ? blocks : nil
@@ -154,7 +166,8 @@ public enum ButtonBindingSupport {
         case 53 where isBasiliskV3Family(profileID): return ButtonBindingDraft(kind: .scrollRight, hidKey: 4, turboEnabled: false, turboRate: defaultTurboRate)
         case 96:
             switch profileID {
-            case .basiliskV3, .basiliskV3Pro, .basiliskV335K, .basiliskV3Pro35K, .basiliskV3XHyperspeed, .orochiV2, .nagaPro, .nagaV2Pro, .basilisk, .lanceheadTournamentEdition, .none: return ButtonBindingDraft(kind: .dpiCycle, hidKey: 4, turboEnabled: false, turboRate: defaultTurboRate)
+            case .basiliskV3, .basiliskV3Pro, .basiliskV335K, .basiliskV3Pro35K, .basiliskV3Pro35KStandard, .basiliskV3XHyperspeed, .orochiV2, .nagaPro, .nagaV2Pro, .basilisk, .lanceheadTournamentEdition, .none:
+                return ButtonBindingDraft(kind: .dpiCycle, hidKey: 4, turboEnabled: false, turboRate: defaultTurboRate)
             case .nagaV3Pro, .huntsmanMini, .tartarusPro, .mouseDock, .mouseDockPro: return nil
             }
         default: return nil
@@ -218,6 +231,9 @@ public enum ButtonBindingSupport {
             let hidModifiers = Int(data[0])
             let hidKey = data.count >= 2 ? Int(data[1]) : Int(functionBlock[3])
             return ButtonBindingDraft(kind: .keyboardSimple, hidKey: max(4, min(231, hidKey)), hidModifiers: max(0, min(255, hidModifiers)), turboEnabled: false, turboRate: defaultTurboRate)
+        case 0x0A:
+            guard supportsMediaKeyBindings(profileID), data.count == 2, let kind = ButtonBindingKind.mediaKind(forConsumerUsage: (UInt16(data[0]) << 8) | UInt16(data[1])) else { return nil }
+            return ButtonBindingDraft(kind: kind, hidKey: 4, turboEnabled: false, turboRate: defaultTurboRate)
         case 0x0D:
             guard data.count >= 4 else { return nil }
             let hidModifiers = Int(data[0])
@@ -310,6 +326,9 @@ public enum ButtonBindingSupport {
         case .dpiCycle: return [0x06, 0x01, 0x06, 0x00, 0x00, 0x00, 0x00]
         case .dpiClutch: return basiliskDPIClutchBlock(dpi: clutchDPI ?? defaultBasiliskDPIClutchDPI, profileID: profileID ?? .basiliskV3Pro)
         case .clearLayer: return [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+        case .mediaPlayPause, .mediaNextTrack, .mediaPreviousTrack, .mediaVolumeUp, .mediaVolumeDown, .mediaMute:
+            let usage = kind.consumerUsage ?? 0
+            return [0x0A, 0x02, UInt8((usage >> 8) & 0xFF), UInt8(usage & 0xFF), 0x00, 0x00, 0x00]
         case .keyboardSimple:
             if turboEnabled { return [0x0D, 0x04, clampedModifiers, clampedKey, turboHi, turboLo, 0x00] }
             return [0x02, 0x02, clampedModifiers, clampedKey, 0x00, 0x00, 0x00]
@@ -342,6 +361,10 @@ public enum ButtonBindingSupport {
         // `06 01 06` form when the button is remapped to DPI-stage cycling. Both Naga families ship
         // this button at slot 14; the Naga Pro's unassigned banks hold the same `07 01 04` block.
         case 14 where isNagaFamily(profileID): return [0x07, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00]
+        // Standard Basilisk V3 Pro 35K (Bluetooth): factory blocks of the Scroll Mode Toggle (slot 14) and the Profile Button
+        // (slot 106), read from a stored profile on hardware. Both slots are read-only, so these blocks only identify "Default".
+        case 14 where profileID == .basiliskV3Pro35KStandard: return [0x07, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00]
+        case 106 where profileID == .basiliskV3Pro35KStandard: return [0x12, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00]
         // The Naga Pro's DPI buttons share the V3 Pro's factory blocks; both were read from the
         // device's unassigned banks, and both slots round-trip writes on the receiver.
         case 11 where profileID == .nagaPro: return [0x06, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00]
@@ -349,7 +372,7 @@ public enum ButtonBindingSupport {
         case 96:
             switch profileID {
             case .basiliskV3, .basiliskV335K: return [0x04, 0x02, 0x0F, 0x7B, 0x00, 0x00, 0x00]
-            case .basiliskV3Pro, .basiliskV3Pro35K: return [0x06, 0x01, 0x06, 0x00, 0x00, 0x00, 0x00]
+            case .basiliskV3Pro, .basiliskV3Pro35K, .basiliskV3Pro35KStandard: return [0x06, 0x01, 0x06, 0x00, 0x00, 0x00, 0x00]
             case .basiliskV3XHyperspeed, .orochiV2, .nagaPro, .nagaV2Pro, .basilisk, .lanceheadTournamentEdition, .none: return [0x06, 0x01, 0x06, 0x00, 0x00, 0x00, 0x00]
             case .nagaV3Pro, .huntsmanMini, .tartarusPro, .mouseDock, .mouseDockPro: return nil
             }
@@ -385,6 +408,7 @@ public enum ButtonBindingSupport {
         ButtonBindingKind.allCases.filter { kind in
             switch kind {
             case .dpiClutch: return isBasiliskV3Family(profileID)
+            case .mediaPlayPause, .mediaNextTrack, .mediaPreviousTrack, .mediaVolumeUp, .mediaVolumeDown, .mediaMute: return supportsMediaKeyBindings(profileID)
             default: return true
             }
         }
@@ -394,6 +418,7 @@ public enum ButtonBindingSupport {
 
     private static func buttonSlotDescriptors(for profileID: DeviceProfileID?) -> [ButtonSlotDescriptor] {
         switch profileID {
+        case .basiliskV3Pro35KStandard: return DeviceProfiles.basiliskV3Pro35KBluetoothButtonSlots
         case .basiliskV3, .basiliskV3Pro, .basiliskV335K, .basiliskV3Pro35K: return DeviceProfiles.basiliskV3FamilyButtonSlots
         case .basiliskV3XHyperspeed, .none: return DeviceProfiles.basiliskV3XButtonSlots
         case .orochiV2: return DeviceProfiles.orochiV2BluetoothButtonSlots
@@ -405,6 +430,10 @@ public enum ButtonBindingSupport {
         }
     }
 
+    /// Media (HID Consumer) bindings are a class `0x0A` function block. Synapse wrote the examples that were read from a
+    /// Basilisk V3 Pro 35K over Bluetooth. Only that profile offers them, until other models are tested.
+    private static func supportsMediaKeyBindings(_ profileID: DeviceProfileID?) -> Bool { profileID == .basiliskV3Pro35KStandard }
+
     private static func usesExtendedBasiliskUSBReadLayout(_ profileID: DeviceProfileID?) -> Bool { isBasiliskV3Family(profileID) }
 
     // Factory sensitivity-clutch block (400 DPI) read back from untouched stored profiles. The
@@ -413,7 +442,7 @@ public enum ButtonBindingSupport {
 
     private static func usesCompactBasiliskDPIClutchDefault(_ profileID: DeviceProfileID?) -> Bool {
         switch profileID {
-        case .basiliskV3, .basiliskV335K, .basiliskV3Pro35K: return true
+        case .basiliskV3, .basiliskV335K, .basiliskV3Pro35K, .basiliskV3Pro35KStandard: return true
         case .basiliskV3Pro, .basiliskV3XHyperspeed, .orochiV2, .nagaPro, .nagaV2Pro, .nagaV3Pro, .basilisk, .lanceheadTournamentEdition, .huntsmanMini, .tartarusPro, .mouseDock, .mouseDockPro, .none: return false
         }
     }

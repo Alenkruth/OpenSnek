@@ -107,6 +107,7 @@ actor BridgeClient {
     var btReqID: UInt8 = 0x30
     var btDpiSnapshotByDeviceID: [String: BLEVendorProtocol.DpiStageSnapshot] = [:]
     var btExpectedDpiByDeviceID: [String: BluetoothExpectedDpiState] = [:]
+    var btMappedPowerTelemetryReadAtByDeviceID: [String: Date] = [:]
     var usbLogicalOnboardDPIByDeviceID: [String: [Int: OnboardDPIProfileSnapshot]] = [:]
     let btVendorClient: BLEVendorTransportClient
     let hidDevicePresenceMonitor = HIDDevicePresenceMonitor()
@@ -554,8 +555,14 @@ actor BridgeClient {
             if passiveDpiObservedDeviceIDs.contains(device.id), let state = lastStateByDeviceID[device.id], let active = state.dpi_stages.active_stage, let values = state.dpi_stages.values, !values.isEmpty { return (active: max(0, min(values.count - 1, active)), values: values) }
             if supportsMappedOnboardProfiles {
                 guard let state = lastStateByDeviceID[device.id], let values = state.dpi_stages.values, !values.isEmpty else { return nil }
-                let active = max(0, min(values.count - 1, state.dpi_stages.active_stage ?? 0))
-                return (active: active, values: values)
+                let cachedActive = max(0, min(values.count - 1, state.dpi_stages.active_stage ?? 0))
+                // A mouse that sends no passive DPI reports does not show its DPI button. Poll the hardware-active DPI, which follows the
+                // button when any profile is active. Find its stage in the table of the selected profile. Do not replace that table.
+                let pollsLiveStage = DeviceProfiles.resolve(vendorID: device.vendor_id, productID: device.product_id, transport: device.transport)?.pollsLiveDPIStageWithOnboardProfiles == true
+                guard pollsLiveStage, let live = try? await btReadLiveDPIPair(device: device) else { return (active: cachedActive, values: values) }
+                let pairs = state.dpi_stages.pairs ?? values.map { DpiPair(x: $0, y: $0) }
+                let active = AppStateEditorController.uniqueDPIStageIndex(matching: live, in: pairs) ?? cachedActive
+                return (active: max(0, min(values.count - 1, active)), values: values)
             }
             guard let parsed = try await btGetDpiStages(device: device) else { return nil }
             let now = Date()

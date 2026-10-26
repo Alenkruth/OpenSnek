@@ -223,6 +223,41 @@ final class BLEVendorProtocolTests: XCTestCase {
         XCTAssertEqual(Array(payload), [0x01, 0x03, 0x00, 0x0D, 0x04, 0x08, 0x2F, 0x00, 0x8E, 0x00])
     }
 
+    func testButtonPayloadMediaKeysUseConsumerUsageBlocks() {
+        // Class 0x0A, length 2, big-endian HID Consumer usage. Synapse stored Volume Down and Volume Up on slots 4 and 5 in this form.
+        XCTAssertEqual(Array(BLEVendorProtocol.buildButtonPayload(slot: 0x04, kind: .mediaVolumeDown, hidKey: nil, profileID: .basiliskV3Pro35KStandard)), [0x01, 0x04, 0x00, 0x0A, 0x02, 0x00, 0xEA, 0x00, 0x00, 0x00])
+        XCTAssertEqual(Array(BLEVendorProtocol.buildButtonPayload(slot: 0x05, kind: .mediaVolumeUp, hidKey: nil, profileID: .basiliskV3Pro35KStandard)), [0x01, 0x05, 0x00, 0x0A, 0x02, 0x00, 0xE9, 0x00, 0x00, 0x00])
+        XCTAssertEqual(Array(BLEVendorProtocol.buildButtonPayload(slot: 0x05, kind: .mediaPlayPause, hidKey: nil, profileID: .basiliskV3Pro35KStandard)), [0x01, 0x05, 0x00, 0x0A, 0x02, 0x00, 0xCD, 0x00, 0x00, 0x00])
+        XCTAssertEqual(ButtonBindingKind.mediaMute.consumerUsage, 0x00E2)
+        XCTAssertEqual(ButtonBindingKind.mediaNextTrack.consumerUsage, 0x00B5)
+        XCTAssertEqual(ButtonBindingKind.mediaPreviousTrack.consumerUsage, 0x00B6)
+    }
+
+    func testStoredMediaBindingsFromHardwareDecodeOnTheBasiliskV3Pro35K() {
+        // Stored-profile readbacks from a Basilisk V3 Pro 35K. The media block is in the even lane. The factory block is in the odd lane.
+        let slot4 = Data([0x04, 0x00, 0x0A, 0x01, 0x02, 0x01, 0x00, 0x04, 0xEA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        let slot5 = Data([0x05, 0x00, 0x0A, 0x01, 0x02, 0x01, 0x00, 0x05, 0xE9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        let block4 = BLEVendorProtocol.extractBluetoothFunctionBlock(payload: slot4, target: 2, slot: 4, profileID: .basiliskV3Pro35KStandard)
+        let block5 = BLEVendorProtocol.extractBluetoothFunctionBlock(payload: slot5, target: 2, slot: 5, profileID: .basiliskV3Pro35KStandard)
+        XCTAssertEqual(block4, [0x0A, 0x02, 0x00, 0xEA, 0x00, 0x00, 0x00])
+        XCTAssertEqual(block5, [0x0A, 0x02, 0x00, 0xE9, 0x00, 0x00, 0x00])
+        XCTAssertEqual(ButtonBindingSupport.buttonBindingDraftFromUSBFunctionBlock(slot: 4, functionBlock: block4 ?? [], profileID: .basiliskV3Pro35KStandard)?.kind, .mediaVolumeDown)
+        XCTAssertEqual(ButtonBindingSupport.buttonBindingDraftFromUSBFunctionBlock(slot: 5, functionBlock: block5 ?? [], profileID: .basiliskV3Pro35KStandard)?.kind, .mediaVolumeUp)
+    }
+
+    func testMediaBindingsRoundTripAndStayLimitedToTheStandard35K() {
+        let mediaKinds: [ButtonBindingKind] = [.mediaPlayPause, .mediaNextTrack, .mediaPreviousTrack, .mediaVolumeUp, .mediaVolumeDown, .mediaMute]
+        for kind in mediaKinds {
+            let block = ButtonBindingSupport.buildUSBFunctionBlock(slot: 5, kind: kind, hidKey: 4, turboEnabled: false, turboRate: 0x8E, profileID: .basiliskV3Pro35KStandard)
+            XCTAssertEqual(ButtonBindingSupport.buttonBindingDraftFromUSBFunctionBlock(slot: 5, functionBlock: block, profileID: .basiliskV3Pro35KStandard)?.kind, kind, kind.label)
+            XCTAssertTrue(ButtonBindingSupport.availableButtonBindingKinds(profileID: .basiliskV3Pro35KStandard).contains(kind), kind.label)
+            XCTAssertFalse(kind.supportsTurbo)
+            // Other models do not offer or decode these kinds until hardware tests are done.
+            XCTAssertFalse(ButtonBindingSupport.availableButtonBindingKinds(profileID: .basiliskV3Pro).contains(kind), kind.label)
+            XCTAssertNil(ButtonBindingSupport.buttonBindingDraftFromUSBFunctionBlock(slot: 5, functionBlock: block, profileID: .basiliskV3Pro), kind.label)
+        }
+    }
+
     func testButtonPayloadMiddleClick() {
         let payload = BLEVendorProtocol.buildButtonPayload(slot: 0x03, kind: .middleClick, hidKey: nil)
         XCTAssertEqual(Array(payload), [0x01, 0x03, 0x00, 0x01, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00])
