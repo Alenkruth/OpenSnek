@@ -175,6 +175,7 @@ extension BridgeClient {
                 try await btWriteOnboardProfileMetadata(device: device, target: profileID, metadata: metadataForWrite)
             }
             try await btApplyOnboardProfileMutation(device: device, profile: profile, target: profileID, mutation: mutation.withoutMetadata)
+            if profile.appliesLightingEffectsLiveWithOnboardProfiles { try await btProjectOnboardProfileLightingToActiveLayer(device: device, target: profileID, mutation: mutation) }
             return try await btReadOnboardProfile(device: device, profile: profile, target: profileID)
         }
     }

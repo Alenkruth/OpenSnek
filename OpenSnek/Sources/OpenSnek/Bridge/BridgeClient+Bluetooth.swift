@@ -25,6 +25,13 @@ extension BridgeClient {
         }
     }
 
+    func resolvedDeviceProfile(for device: MouseDevice) -> DeviceProfile? { DeviceProfiles.resolve(vendorID: device.vendor_id, productID: device.product_id, transport: device.transport) }
+
+    func usesExtendedProfileSessionHandling(_ device: MouseDevice) -> Bool { resolvedDeviceProfile(for: device)?.usesExtendedProfileSessionHandling == true }
+
+    /// Profile writes go to flash. The mouse can acknowledge them slowly on a busy link. Mice that opt in wait longer than for a live exchange.
+    func profileWriteAckTimeout(for device: MouseDevice) -> TimeInterval { usesExtendedProfileSessionHandling(device) ? 2.5 : 0.9 }
+
     /// Whether this Bluetooth device uses the per-zone state lighting surface (`10 83`/`10 03`
     /// color, `10 85`/`10 05` brightness) instead of the legacy single-frame lighting keys.
     func usesBluetoothZoneStateLighting(_ device: MouseDevice) -> Bool {
@@ -63,7 +70,7 @@ extension BridgeClient {
         let profileID = device.profile_id ?? DeviceProfiles.resolve(vendorID: device.vendor_id, productID: device.product_id, transport: device.transport)?.id
         let usesNagaBattery = device.transport == .bluetooth && profileID?.usesNagaBluetoothBatteryTelemetry == true
         // The V3 Pro 35K reported raw 0x7B over Bluetooth, so its byte is on the 0-255 scale even below 100.
-        let isV3Pro35KBluetooth = device.transport == .bluetooth && (device.profile_id == .basiliskV3Pro35K || device.product_id == 0x00D8)
+        let isV3Pro35KBluetooth = device.transport == .bluetooth && (profileID == .basiliskV3Pro35K || profileID == .basiliskV3Pro35KStandard || device.product_id == 0x00D8)
         let isV4Bluetooth = device.transport == .bluetooth && profileID == .basiliskV4Hyperspeed
         let vendorPercent = vendorRaw.map { raw in
             if isV3XBluetooth { return Int((Double(min(max(raw, 0), 255)) / 255.0 * 100.0).rounded()) }
@@ -109,7 +116,7 @@ extension BridgeClient {
             AppLog.debug("Bridge", "btReadLightingColor no-payload device=\(device.id) led=0x\(String(format: "%02x", ledID)) req=\(req) notifies=\(btNotifySummary(notifies))")
             return nil
         }
-        let parsed = parseLightingRGB(payload: payload)
+        let parsed = parseLightingRGB(payload: payload, usesZoneState: usesBluetoothZoneStateLighting(device) && resolvedDeviceProfile(for: device)?.appliesLightingEffectsLiveWithOnboardProfiles == true)
         if let parsed {
             AppLog.debug("Bridge", "btReadLightingColor device=\(device.id) led=0x\(String(format: "%02x", ledID)) rgb=(\(parsed.r),\(parsed.g),\(parsed.b))")
         } else {
@@ -284,6 +291,12 @@ extension BridgeClient {
         return false
     }
 
+    /// The hardware-active DPI (`0B 81 00 00`) follows the DPI button when any profile is active.
+    func btReadLiveDPIPair(device: MouseDevice) async throws -> DpiPair? {
+        guard let payload = try await btReadPayload(device: device, key: .dpiScalarGet(target: 0)) else { return nil }
+        return BLEVendorProtocol.parseDpiScalarPair(blob: payload)
+    }
+
     func btGetDpiStages(device: MouseDevice) async throws -> BLEVendorProtocol.DpiStagesRead? {
         let req = nextBTReq()
         let header = BLEVendorProtocol.buildReadHeader(req: req, key: .dpiStagesGet)
@@ -441,10 +454,13 @@ extension BridgeClient {
         return true
     }
 
-    func parseLightingRGB(payload: Data) -> RGBPatch? {
+    func parseLightingRGB(payload: Data, usesZoneState: Bool = false) -> RGBPatch? {
         guard !payload.isEmpty else { return nil }
 
         if let zoneState = BLEVendorProtocol.parseV3ProLightingZoneStatePayload(payload) { return zoneState }
+        // A zone that runs a built-in effect returns an effect-shaped payload and not a static color.
+        // The legacy layouts below would read the effect bytes as RGB. Report no color instead.
+        if usesZoneState { return nil }
         if payload.count >= 8, payload[0] == 0x04 { return RGBPatch(r: Int(payload[5]), g: Int(payload[6]), b: Int(payload[7])) }
         if payload.count >= 4 { return RGBPatch(r: Int(payload[1]), g: Int(payload[2]), b: Int(payload[3])) }
         return nil
