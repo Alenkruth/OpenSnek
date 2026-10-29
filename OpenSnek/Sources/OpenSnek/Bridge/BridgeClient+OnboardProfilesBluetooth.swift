@@ -220,7 +220,8 @@ extension BridgeClient {
                 guard try await btWriteAck(device: device, key: .lightingZoneStateSet(ledID: UInt8(ledID)), payload: payload, timeout: profileWriteAckTimeout(for: device)) else { throw BridgeError.commandFailed("Live static color write was rejected for LED \(ledID).") }
             }
             for (ledID, effect) in mutation.effectByLEDID ?? [:] {
-                let payload = BLEVendorProtocol.buildBluetoothZoneEffectPayload(effect: effect)
+                // Profiles that apply effects live write the Spectrum body that the mouse read after a reset in Synapse.
+                let payload = BLEVendorProtocol.buildBluetoothZoneEffectPayload(effect: effect, usesSynapseSpectrumBody: resolvedDeviceProfile(for: device)?.appliesLightingEffectsLiveWithOnboardProfiles == true)
                 guard try await btWriteAck(device: device, key: .lightingZoneStateSet(ledID: UInt8(ledID)), payload: payload, timeout: profileWriteAckTimeout(for: device)) else { throw BridgeError.commandFailed("Live lighting effect write was rejected for LED \(ledID).") }
             }
         } catch {
