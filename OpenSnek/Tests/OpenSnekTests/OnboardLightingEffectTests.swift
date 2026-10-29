@@ -8,8 +8,15 @@ import OpenSnekProtocols
 /// Exercises built-in lighting effects applied to the live lights alongside onboard profiles (Basilisk V3 Pro 35K over Bluetooth).
 final class OnboardLightingEffectTests: XCTestCase {
     func testEffectPayloadsMatchHardwareTestedBodies() {
-        // Spectrum restores the factory zone state exactly (`03` plus padding), as verified against the mouse.
+        // The default builder pads Spectrum with zeros. Other mice keep these bytes.
         XCTAssertEqual(Array(BLEVendorProtocol.buildBluetoothZoneEffectPayload(effect: LightingEffectPatch(kind: .spectrum))), [0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        // The 35K writes the Spectrum body that it read after a reset in Synapse. Only Spectrum changes.
+        let synapseSpectrum = BLEVendorProtocol.buildBluetoothZoneEffectPayload(effect: LightingEffectPatch(kind: .spectrum), usesSynapseSpectrumBody: true)
+        XCTAssertEqual(Array(synapseSpectrum), [0x03, 0x00, 0x00, 0x00, 0x0C, 0x10, 0x8C, 0xFF, 0x10, 0x8C])
+        XCTAssertEqual(BLEVendorProtocol.buildBluetoothZoneEffectPayload(effect: LightingEffectPatch(kind: .pulseRandom), usesSynapseSpectrumBody: true), BLEVendorProtocol.buildBluetoothZoneEffectPayload(effect: LightingEffectPatch(kind: .pulseRandom)))
+        // The mouse reports this body back as Spectrum, and the static color parser does not read it as a color.
+        XCTAssertEqual(BLEVendorProtocol.parseBluetoothZoneEffect(synapseSpectrum)?.kind, .spectrum)
+        XCTAssertNil(BLEVendorProtocol.parseV3ProLightingZoneStatePayload(synapseSpectrum))
         XCTAssertEqual(Array(BLEVendorProtocol.buildBluetoothZoneEffectPayload(effect: LightingEffectPatch(kind: .pulseRandom))), [0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0])
         XCTAssertEqual(Array(BLEVendorProtocol.buildBluetoothZoneEffectPayload(effect: LightingEffectPatch(kind: .pulseSingle, primary: RGBPatch(r: 0, g: 0, b: 255)))), [0x02, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0, 0, 0])
     }
@@ -136,5 +143,48 @@ final class OnboardLightingEffectTests: XCTestCase {
         XCTAssertEqual(spectrumUpdate.profileID, 2)
         XCTAssertEqual(Set(try XCTUnwrap(spectrumUpdate.mutation.effectByLEDID).keys), [1, 4, 10], "effects apply to every LED of the profile")
         XCTAssertNil(spectrumUpdate.mutation.staticColorByLEDID)
+    }
+
+    /// A profile update on the 35K takes seconds. The result of an older update must not replace a color that the user picked after that update began.
+    func testAnOlderLightingUpdateDoesNotRevertALaterColorEdit() async throws {
+        let device = makeRefactorTestDevice(id: "onboard-bt-35k-late-update-device", transport: .bluetooth, serial: "ONBOARD-BT-35K-LATE-\(UUID().uuidString)", onboardProfileCount: 5, profileID: .basiliskV3Pro35KStandard)
+        let backend = AppStateRefactorStubBackend(
+            devices: [device],
+            stateByDeviceID: [
+                device.id: makeRefactorTestState(device: device, telemetry: RefactorTestStateTelemetry(connection: "bluetooth", batteryPercent: 74, dpiValues: [1000, 2000, 4000, 6000, 10000], activeStage: 2), options: RefactorTestStateOptions(activeOnboardProfile: 1, onboardProfileCount: 5))
+            ])
+        await backend.setOnboardInventory(
+            OnboardProfileInventory(activeProfileID: 1, maxProfileID: 5, assignedProfileIDs: [1, 2], profiles: [makeRefactorOnboardProfileSummary(profileID: 1, name: "Base", isActive: true), makeRefactorOnboardProfileSummary(profileID: 2, name: "Stored 2", isActive: false)]), forDeviceID: device.id)
+        await backend.setOnboardSnapshot(
+            makeRefactorOnboardProfileSnapshot(profileID: 1, name: "Base", dpiValues: [1000, 2000, 4000, 6000, 10000], brightnessByLEDID: [1: 51, 4: 51, 10: 51], staticColorByLEDID: [1: RGBPatch(r: 0, g: 255, b: 0), 4: RGBPatch(r: 0, g: 255, b: 0), 10: RGBPatch(r: 0, g: 255, b: 0)]),
+            forDeviceID: device.id)
+
+        let appState = await MainActor.run { AppState(launchRole: .app, backend: backend, autoStart: false) }
+        await appState.deviceStore.refreshDevices()
+        await appState.editorStore.refreshOnboardProfiles()
+        try await waitForRefactorCondition { await MainActor.run { appState.editorStore.selectedOnboardProfileID == 1 } }
+
+        let red = RGBColor(r: 255, g: 0, b: 0)
+        let blue = RGBColor(r: 0, g: 0, b: 255)
+        await backend.holdOnboardUpdate(deviceID: device.id, profileID: 1)
+        await MainActor.run {
+            appState.editorStore.editableColor = red
+            appState.editorStore.scheduleAutoApplyLedColor()
+        }
+        await backend.waitForOnboardUpdateToStart(deviceID: device.id, profileID: 1)
+
+        // The user picks blue while the red update is still in flight. The red update then finishes first.
+        await MainActor.run {
+            appState.editorStore.editableColor = blue
+            appState.editorStore.scheduleAutoApplyLedColor()
+        }
+        await backend.releaseOnboardUpdate(deviceID: device.id, profileID: 1)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let colorAfterOlderUpdate = await MainActor.run { appState.editorStore.editableColor }
+        XCTAssertEqual(colorAfterOlderUpdate, blue, "the result of the older red update must not replace the later blue edit")
+
+        try await waitForRefactorCondition { await backend.recordedOnboardUpdates().contains { $0.mutation.staticColorByLEDID?.values.contains(RGBPatch(r: 0, g: 0, b: 255)) == true } }
+        let finalColor = await MainActor.run { appState.editorStore.editableColor }
+        XCTAssertEqual(finalColor, blue)
     }
 }
