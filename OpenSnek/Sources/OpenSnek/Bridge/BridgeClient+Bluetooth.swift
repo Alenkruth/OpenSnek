@@ -168,13 +168,14 @@ extension BridgeClient {
                 if let pairs = btStages?.pairs, active < pairs.count { return pairs[active] }
                 let value = values[active]
                 return DpiPair(x: value, y: value)
-            }(), dpi_stages: DpiStages(active_stage: btStages?.active, values: btStages?.values, pairs: btStages?.pairs), poll_rate: nil, sleep_timeout: sleepTimeout ?? (shouldPollGenericTelemetry ? nil : previousState?.sleep_timeout), device_mode: nil, active_onboard_profile: activeOnboardProfile,
+            }(), dpi_stages: DpiStages(active_stage: btStages?.active, values: btStages?.values, pairs: btStages?.pairs), poll_rate: nil, sleep_timeout: sleepTimeout, device_mode: nil, active_onboard_profile: activeOnboardProfile,
             onboard_profile_count: profile?.supportsMappedOnboardProfileCRUD == true ? profile?.onboardProfileCount : nil, led_value: lighting, capabilities: Capabilities(dpi_stages: true, poll_rate: false, power_management: true, button_remap: true, lighting: supportsLighting))
     }
 
     nonisolated static func shouldPollBluetoothGenericTelemetryForReadState(supportsMappedOnboardProfiles: Bool) -> Bool { !supportsMappedOnboardProfiles }
 
-    /// Mice that opt in read battery and sleep timeout about once each minute. The previous values stay between reads.
+    /// Mice that opt in read battery and sleep timeout about once each minute. The previous battery values stay between reads.
+    /// The sleep timeout is editable, so a refresh without a read must not return an older value to the editor.
     nonisolated static func bluetoothMappedPowerTelemetryIsDue(lastReadAt: Date?, now: Date, interval: TimeInterval = 60) -> Bool {
         guard let lastReadAt else { return true }
         return now.timeIntervalSince(lastReadAt) >= interval

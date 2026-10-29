@@ -570,7 +570,8 @@ import OpenSnekCore
             let storedSnapshot = storeCurrentOnboardProfileSnapshot(snapshot, device: device, source: "updateOnboardProfile", projectMetadataForRefresh: resolvedMutation.metadata != nil, expectedDPIReadback: resolvedMutation.dpi)
             if selectedOnboardProfileIDByDeviceID[device.id] == selected {
                 if let bindings = resolvedMutation.buttonBindings { cacheSelectedOnboardProfileButtonBindings(snapshot.buttonBindings.merging(bindings) { _, updated in updated }, device: device, profileID: selected, appliedEditRevision: mutationStartedEditRevision) }
-                hydrateEditableLighting(from: storedSnapshot, device: device)
+                // A slow update can finish after the user edits again. Its snapshot is older than the editor, and the next apply reads the editor.
+                if (applyController.lastLocalEditAt ?? .distantPast) > startedAt { AppLog.debug("AppState", "update onboard profile lighting hydration skipped, newer local edit device=\(device.id) profile=\(selected)") } else { hydrateEditableLighting(from: storedSnapshot, device: device) }
                 hydrateEditableScroll(from: storedSnapshot)
             }
             if selectedOnboardProfileIsActive() { _ = try await environment.backend.refreshActiveOnboardProfile(device: device) }

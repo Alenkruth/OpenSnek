@@ -471,7 +471,12 @@ public enum BLEVendorProtocol {
 
     /// Naga V3 Pro BLE zone-state effects omit USB's storage/LED prefix and pad to ten bytes.
     /// Off is an effect write, not brightness zero, so returning to Static preserves brightness.
-    public static func buildBluetoothZoneEffectPayload(effect: LightingEffectPatch) -> Data {
+    /// A Basilisk V3 Pro 35K read `03 00 00 00 0C 10 8C FF 10 8C` for Spectrum after a reset in Razer Synapse. Bytes `4..9` hold two colors that Spectrum does not use.
+    /// A profile that sets `usesSynapseSpectrumBody` writes that body for Spectrum, and not zero padding.
+    public static let synapseSpectrumZoneState = Data([0x03, 0x00, 0x00, 0x00, 0x0C, 0x10, 0x8C, 0xFF, 0x10, 0x8C])
+
+    public static func buildBluetoothZoneEffectPayload(effect: LightingEffectPatch, usesSynapseSpectrumBody: Bool = false) -> Data {
+        if usesSynapseSpectrumBody, effect.kind == .spectrum { return synapseSpectrumZoneState }
         let effectBytes = Array(buildScrollLEDEffectArgs(effect: effect).dropFirst(2))
         let minimumPayloadLength = 10
         return Data(effectBytes + Array(repeating: 0, count: max(0, minimumPayloadLength - effectBytes.count)))

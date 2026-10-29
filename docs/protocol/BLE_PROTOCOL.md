@@ -546,6 +546,7 @@ The mouse does not keep built-in effects in a stored profile. Razer staff state 
 
 - Stored zone slots (`10 83 <target> <LED>`, targets `2..5`) have the same 10-byte layout as the live zone state. They hold static colors. An unedited slot reads `03 01 28 01 00 ff 00 00 ff 00`, which is an effect-shaped Spectrum.
 - OpenSnek writes an effect to the live lighting (`10 03 00 <LED>`) only.
+- After a reset in Razer Synapse, the active profile read `03 00 00 00 0C 10 8C FF 10 8C` for Spectrum on each LED. Bytes `4..9` hold two colors that Spectrum does not use. OpenSnek writes this body for Spectrum on this model. Other models keep the zero-padded body `03 00 00 00 00 00 00 00 00 00`.
 - When OpenSnek reads a stored zone, it decodes `03` as Spectrum and `02 <variant>` as Pulse. The Pulse variants are random, single (`RGB1` at bytes `4..6`) and dual (`RGB2` at bytes `7..9`).
 - Brightness stays through sleep. Live zone effects do not stay. After sleep, the zones show the stored state.
 - Spectrum changes smoothly. At brightness `0x33`, Pulse changes in visible steps.
