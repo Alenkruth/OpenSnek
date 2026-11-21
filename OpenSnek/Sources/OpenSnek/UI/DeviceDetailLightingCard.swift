@@ -18,6 +18,7 @@ struct LightingSwatch: Identifiable, Hashable {
 
 /// Renders the lighting card UI.
 struct LightingCard: View {
+    @Environment(\.isDocumentationPreview) private var isDocumentationPreview
     let editorStore: EditorStore
     let selected: MouseDevice
     let swatches: [LightingSwatch]
@@ -116,9 +117,9 @@ struct LightingCard: View {
 
     private var softwareLightingIsRunning: Bool { softwareLightingStatus?.state == .running }
 
-    private var lightingSummaryTitle: String { lightingSummaryPresentation.title }
+    private var lightingSummaryTitle: String { selected.supportsLightingColorControls ? lightingSummaryPresentation.title : "Brightness" }
 
-    private var lightingSummarySwatches: [RGBColor] { lightingSummaryPresentation.swatches }
+    private var lightingSummarySwatches: [RGBColor] { selected.supportsLightingColorControls ? lightingSummaryPresentation.swatches : [] }
 
     private var lightingSummaryPresentation: LightingSummaryPresentation {
         LightingSummaryPresentation.make(
@@ -351,18 +352,20 @@ struct LightingCard: View {
     }
 
     @ViewBuilder private func onboardControls(includePresetPicker: Bool = true) -> some View {
-        lightingNotice(systemImage: "memorychip.fill", iconColor: actionAccent, text: "Onboard lighting is stored on the device and survives restart and reconnect.")
+        if selected.supportsLightingColorControls { lightingNotice(systemImage: "memorychip.fill", iconColor: actionAccent, text: "Onboard lighting is stored on the device and survives restart and reconnect.") }
 
         if selected.supportsLightingBrightnessControls { brightnessControls().padding(.vertical, 2) }
 
-        if includePresetPicker { onboardPresetPicker() }
-        onboardEffectOptions()
-        onboardColorControls()
+        if selected.supportsLightingColorControls {
+            if includePresetPicker { onboardPresetPicker() }
+            onboardEffectOptions()
+            onboardColorControls()
+        }
     }
 
     var body: some View {
         Card(title: "Lighting", accessibilityIdentifier: "lighting-card") {
-            lightingSummaryRow()
+            lightingSummaryRow().zIndex(1)
 
             if effectiveExpanded {
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1).padding(.vertical, 2)
@@ -375,7 +378,10 @@ struct LightingCard: View {
                     if activeTab == .advanced { advancedLightingControls() } else { onboardControls() }
                 }
             }
-        }.background(RoundedRectangle(cornerRadius: 14).fill(LinearGradient(colors: lightingCardGradientColors, startPoint: .topLeading, endPoint: .bottomTrailing))).onAppear { selectedTab = preferredLightingTab }.onChange(of: selected.id) {
+        }.background(RoundedRectangle(cornerRadius: 14).fill(LinearGradient(colors: lightingCardGradientColors, startPoint: .topLeading, endPoint: .bottomTrailing))).onAppear {
+            selectedTab = preferredLightingTab
+            if isDocumentationPreview { isExpanded = true }
+        }.onChange(of: selected.id) {
             selectedTab = preferredLightingTab
             isExpanded = false
         }.onChange(of: editorStore.editableSoftwareLightingApplyOnConnect) { _, enabled in if enabled && selected.supportsSoftwareLightingEffects { selectedTab = .advanced } }
@@ -405,9 +411,10 @@ struct LightingCard: View {
             HStack(spacing: -3) { ForEach(Array(lightingSummarySwatches.enumerated()), id: \.offset) { _, color in Circle().fill(Color(rgb: color)).frame(width: 15, height: 15).overlay(Circle().stroke(Color.white.opacity(0.62), lineWidth: 1)) } }.padding(.horizontal, 3).accessibilityHidden(true)
         case let .level(batteryIcon, percent):
             HStack(spacing: 6) {
-                Image(systemName: batteryIcon.symbolName, variableValue: batteryIcon.variableValue)
+                BatteryIconView(icon: batteryIcon)
                 Text("\(percent)%").font(.system(size: 13, weight: .black, design: .monospaced)).foregroundStyle(.white.opacity(0.82))
-            }.font(.system(size: 17, weight: .bold)).foregroundStyle(batteryIcon.accent == .low ? BatteryPresentation.lowBatteryColor : .white.opacity(0.82)).frame(height: 18).accessibilityLabel("Battery Meter").accessibilityIdentifier("lighting-card-summary-battery-icon")
+            }.font(.system(size: 17, weight: .bold)).foregroundStyle(batteryIcon.accent == .low ? BatteryPresentation.lowBatteryColor : .white.opacity(0.82)).frame(height: 18).batteryHoverTooltip(batteryMeterHelp(percent: percent), yOffset: 24).accessibilityLabel("Battery Meter")
+                .accessibilityIdentifier("lighting-card-summary-battery-icon")
         case .unavailable:
             HStack(spacing: 6) {
                 Image(systemName: "battery.0percent")
@@ -531,6 +538,12 @@ struct LightingCard: View {
             BatteryMeterSourceSelectionInput(
                 deviceID: selected.id, ownState: editorStore.deviceStore.state, explicitSourceDeviceID: editorStore.editableSoftwareLightingBatterySourceDeviceID, candidateDeviceIDs: editorStore.deviceStore.devices.map(\.id),
                 unavailableSourceDeviceIDs: editorStore.deviceStore.usbUnavailableDeviceIDs, stateByDeviceID: editorStore.deviceStore.stateByDeviceID))
+    }
+
+    private func batteryMeterHelp(percent: Int) -> String? {
+        let source = batteryMeterSourceState
+        let device = editorStore.deviceStore.devices.first { $0.id == source?.device.id }
+        return editorStore.deviceStore.batteryHelp(for: device, percent: percent, charging: source?.charging)
     }
 
     private func batterySourceLabel(_ device: MouseDevice) -> String {

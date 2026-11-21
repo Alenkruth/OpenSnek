@@ -11,7 +11,7 @@ Prefer the smallest useful command first. Expand only when the change crosses bo
 | Device profile / lighting zone / button-layout changes | `swift test --package-path OpenSnek --filter DeviceProfilesTests` | add probe readback |
 | App-state hydration / persistence / auto-apply | `swift test --package-path OpenSnek --filter AppStateRefactorCharacterizationTests` | add `AppStateMultiDeviceTests` |
 | Background service / backend transport | `swift test --package-path OpenSnek --filter BackgroundServiceTransportTests` | add `RemoteServiceSnapshotTests` or `ServiceModeTests` |
-| Lifecycle / startup / menu bar | `swift test --package-path OpenSnek --filter AppLifecycleDelegateTests` | add `ServiceMenuBarPresentationTests` |
+| Lifecycle / startup / menu bar | `swift test --package-path OpenSnek --filter AppLifecycleDelegateTests` | add `ServiceMenuBarPresentationTests` and `ServiceLaunchPresentationTests` |
 | USB button remap behavior | `swift test --package-path OpenSnek --filter USBButtonHydrationTests` | use `usb-button-read` / `usb-button-set` probe commands |
 | BLE DPI stage behavior | `swift test --package-path OpenSnek --filter BLEVendorProtocolTests` | run hardware gate below when a supported device is connected |
 
@@ -117,6 +117,26 @@ Report the result as `pass`, `fail`, or `skipped` with the actual scope. A passi
 restore-adapter test is not physical hardware validation. Persistence checks power-cycle with the
 app/service stopped, read every changed setting before restoring any, and report per-setting results.
 
+### Basilisk V4 HyperSpeed Bluetooth buttons
+
+`HardwareBasiliskV4BluetoothButtonTests` exercises every advertised button through
+app apply: changed mapping, native Default, and exact original restore. It requires
+the normal opt-in/device/journal variables and a stopped app/service. The journal
+pins the peripheral UUID and saves both complete interleaved read targets. New runs
+require matching target 0/1 baselines; recovery loads the UUID from this test's own
+journal. Use this same test filter with `OPEN_SNEK_HW_RECOVER_JOURNAL` for recovery.
+Physical positions and behavior are not established by these register checks.
+
+### Basilisk V4 HyperSpeed receiver integration
+
+`HardwareBasiliskV4USBTests` uses the same explicit device/journal environment
+variables and recovery workflow above. It exercises the actual app apply path for
+DPI count/X/Y/active-stage transitions, polling, brightness, sleep, six supported
+effects, and Back-button remapping. It snapshots raw stored/live DPI, lighting and
+button registers plus polling/sleep, then restores stored before live and checks
+exact originals. Stop the app/service first. This gate targets receiver `00EA` only;
+it does not establish physical rendering, persistence or unplug/replug behavior.
+
 ### Opt-in Bluetooth disconnect/recovery check
 
 With a scoped mouse A, run the DPI gate above and disconnect A after the journal is created.
@@ -211,6 +231,13 @@ swift run --package-path OpenSnek OpenSnek
 ./OpenSnek/scripts/xcodebuild_generated.sh -scheme OpenSnek -destination 'platform=macOS' test
 ./OpenSnek/scripts/xcodebuild_generated.sh -scheme OpenSnekProbe -destination 'platform=macOS' build
 ```
+
+To check menu-bar launches, enable the service and note the selected device, active profile,
+and DPI. Close the main window with Command-W, then choose **Show OpenSnek**. Check that the
+same editor returns with those controls ready on its first frame. Repeat after changing the
+selection in the menu. Quit the foreground app with Command-Q and choose **Show OpenSnek**
+again to exercise a fresh process using the service’s prepared settings. A disconnected
+mouse should retain its offline status when the window opens.
 
 `OpenSnek/OpenSnek.xcodeproj` is generated from `OpenSnek/project.yml` on demand and is not committed.
 
@@ -317,3 +344,35 @@ swift run --package-path OpenSnek OpenSnekProbe usb-raw --class 0x0f --cmd 0x84 
 ```
 
 Byte 0 is the status: `0x02` success (value in byte 10), `0x03` failure, `0x04` timeout. On the Naga V2 Pro, args `01 00 00` return `0x03` while `01 04 00` return `0x02`; the profile fixes that with `usbBrightnessReadLEDIDs` in `DeviceSupport.swift` instead of weakening the telemetry check. A `0x04` timeout can simply mean the mouse is asleep; wake it before treating a read as a rejection.
+
+## README screenshots
+
+Following qeq's native screenshot workflow, render the real SwiftUI views at 2×
+with fixed illustrative device/profile data:
+
+```bash
+./run.sh --screenshots
+./run.sh --screenshots --check
+```
+
+The renderer uses an isolated preferences suite and an inert backend. It starts
+before the normal app delegate, suppresses view lifecycle I/O, and does not
+connect to hardware, launch/stop the background service, or capture the desktop.
+The desktop scene places the real app window contents to the left and the real
+menu bar controls to the right, with an illustrated wallpaper, menu bar, and
+window chrome, as in qeq. The chrome follows the live macOS 26 window: an inset
+rounded sidebar with its window controls, continuous detail background, and no
+separate full-width title bar. Compare against the live window when updating the
+macOS design; offscreen bitmap rendering cannot capture WindowServer materials.
+It illustrates supported controls, not hardware-validation
+evidence. Review `docs/media/screenshots/desktop.png` after regeneration.
+
+`--output <directory>` writes a separate review set. `--skip-build` intentionally
+uses the staged bundle and should only follow a build of the current source.
+`--app <path.app>` instead renders an existing app bundle without rebuilding; the
+release workflow uses the notarized export.
+`cut_release.sh --prepare` regenerates the committed README screenshot before
+release changes are committed, and tag preflight rejects a stale manifest.
+`--check` compares source and PNG SHA-256 hashes with `screenshots.json` without
+launching the app. Fonts and native controls can vary with the macOS/SDK version;
+this is provenance checking, not a cross-machine pixel-equality test.

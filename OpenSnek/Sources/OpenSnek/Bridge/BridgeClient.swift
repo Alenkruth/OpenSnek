@@ -91,11 +91,13 @@ actor BridgeClient {
     var deviceSessions: [String: USBHIDControlSession] = [:]
     var deviceSessionCandidates: [String: [USBHIDControlSession]] = [:]
     var lastStateByDeviceID: [String: MouseState] = [:]
+    var rechargeableBluetoothBatteryByDeviceID: [String: BluetoothBatterySample] = [:]
     var usbReconnectSettleUntilByDeviceID: [String: Date] = [:]
     let devicePresenceEvents = BroadcastStream<HIDDevicePresenceEvent>()
     let passiveDpiEvents = BroadcastStream<PassiveDPIEvent>()
     let passiveDpiHeartbeatEvents = BroadcastStream<PassiveDPIHeartbeatEvent>()
     let passiveProfileSwitchEvents = BroadcastStream<PassiveProfileSwitchEvent>()
+    let passiveChargingEvents = BroadcastStream<PassiveChargingEvent>()
     var passiveDpiArmedDeviceIDs: Set<String> = []
     var passiveDpiHeartbeatDeviceIDs: Set<String> = []
     var passiveDpiObservedDeviceIDs: Set<String> = []
@@ -105,9 +107,9 @@ actor BridgeClient {
     var passiveDpiTargetsByDeviceID: [String: [PassiveDPIEventMonitor.WatchTarget]] = [:]
     var passiveDpiUpgradeNotBeforeByDeviceID: [String: Date] = [:]
     var btReqID: UInt8 = 0x30
+    var usbV4DPIBaselinesByHandle: [String: [UInt8]] = [:]
     var btDpiSnapshotByDeviceID: [String: BLEVendorProtocol.DpiStageSnapshot] = [:]
     var btExpectedDpiByDeviceID: [String: BluetoothExpectedDpiState] = [:]
-    var btMappedPowerTelemetryReadAtByDeviceID: [String: Date] = [:]
     var usbLogicalOnboardDPIByDeviceID: [String: [Int: OnboardDPIProfileSnapshot]] = [:]
     let btVendorClient: BLEVendorTransportClient
     let hidDevicePresenceMonitor = HIDDevicePresenceMonitor()
@@ -133,6 +135,7 @@ actor BridgeClient {
         passiveDpiMonitor.onEvent = { [weak self] event in Task { await self?.handlePassiveDpiEvent(event) } }
         passiveDpiMonitor.onHeartbeat = { [weak self] event in Task { await self?.handlePassiveDpiHeartbeat(event) } }
         passiveDpiMonitor.onProfileSwitch = { [weak self] event in Task { await self?.handlePassiveProfileSwitch(event) } }
+        passiveDpiMonitor.onCharging = { [passiveChargingEvents] event in passiveChargingEvents.yield(event) }
         if startHIDMonitoring { hidDevicePresenceMonitor.start() }
     }
 
@@ -149,6 +152,7 @@ actor BridgeClient {
         deviceSessions.removeValue(forKey: deviceID)
         deviceSessionCandidates.removeValue(forKey: deviceID)
         lastStateByDeviceID.removeValue(forKey: deviceID)
+        rechargeableBluetoothBatteryByDeviceID.removeValue(forKey: deviceID)
         passiveDpiArmedDeviceIDs.remove(deviceID)
         passiveDpiHeartbeatDeviceIDs.remove(deviceID)
         passiveDpiLastHeartbeatAtByDeviceID.removeValue(forKey: deviceID)
@@ -165,7 +169,7 @@ actor BridgeClient {
         guard device.transport == .usb else { return false }
 
         // Stale IOHIDDevice handles can report telemetry failures after a dongle is pulled.
-        // Always re-run discovery before calling that a sleeping/off mouse; absence means the
+        // Always re-run discovery before calling that a sleeping/off device; absence means the
         // receiver itself is gone and the UI must leave the dongle-only state on replug.
         clearManagedHIDManager()
         do {
@@ -312,7 +316,7 @@ actor BridgeClient {
         for device in devices {
             guard let vendor = USBHIDSupport.intProperty(device, key: kIOHIDVendorIDKey as CFString), vendor == usbVID || vendor == btVID, let product = USBHIDSupport.intProperty(device, key: kIOHIDProductIDKey as CFString) else { continue }
 
-            let name = USBHIDSupport.stringProperty(device, key: kIOHIDProductKey as CFString) ?? "Razer Mouse"
+            let name = USBHIDSupport.stringProperty(device, key: kIOHIDProductKey as CFString) ?? "Razer Device"
             let serial = USBHIDSupport.stringProperty(device, key: kIOHIDSerialNumberKey as CFString)
             let transportRaw = (USBHIDSupport.stringProperty(device, key: kIOHIDTransportKey as CFString) ?? "").lowercased()
             let transport: DeviceTransportKind = transportRaw.contains("bluetooth") || vendor == btVID ? .bluetooth : .usb
@@ -326,7 +330,7 @@ actor BridgeClient {
                 supports_advanced_lighting_effects: profile?.supportsAdvancedLightingEffects ?? false, onboard_profile_count: profile?.onboardProfileCount ?? 1)
             if modelsByID[id] == nil { modelsByID[id] = model }
 
-            if let passiveTarget = passiveDpiWatchTarget(for: device, deviceID: id, profile: profile, transport: transport) { passiveDpiTargets.append(passiveTarget) }
+            if let passiveTarget = passiveDpiWatchTarget(for: device, model: model, profile: profile) { passiveDpiTargets.append(passiveTarget) }
 
             let score = USBHIDSupport.handlePreferenceScore(device: device)
             sessionsByID[id, default: []].append((score: score, session: USBHIDControlSession(device: device, deviceID: id)))
@@ -516,7 +520,7 @@ actor BridgeClient {
         }
         // A device with HID interfaces but no 90-byte feature-report channel (e.g. a
         // headset exposing only consumer controls) can never answer Razer commands;
-        // fail with a distinct error instead of masquerading as a sleeping mouse.
+        // fail with a distinct error instead of masquerading as a sleeping device.
         guard sessions.contains(where: \.supportsControlReports) else { throw BridgeError.usbNoControlInterface }
 
         var firstError: Error?
@@ -608,6 +612,12 @@ actor BridgeClient {
     }
 
     func readLightingColor(device: MouseDevice) async throws -> RGBPatch? {
+        if device.transport == .usb, device.profile_id == .basiliskV4Hyperspeed, let session = sessionFor(device: device) {
+            return try session.withExclusiveDeviceAccess {
+                guard let response = try perform(session, device, classID: 0x0F, cmdID: 0x82, size: 12, args: [1, 0]) else { return nil }
+                return USBHIDProtocol.profileLightingEffectState(from: response, expectedLEDID: 0x0A)?.staticColor
+            }
+        }
         guard device.transport == .bluetooth else { return nil }
         if usesBluetoothZoneStateLighting(device) {
             let ledIDs = bluetoothLightingLEDIDs(device: device)

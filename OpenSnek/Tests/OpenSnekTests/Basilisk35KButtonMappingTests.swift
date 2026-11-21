@@ -71,12 +71,4 @@ final class Basilisk35KButtonMappingTests: XCTestCase {
         XCTAssertFalse(ButtonBindingKind.keyboardSimple.isMediaKey)
         XCTAssertEqual(ButtonBindingKind.leftClick.mediaLabel, ButtonBindingKind.leftClick.label)
     }
-
-    func testBatteryAndSleepTimeoutAreRereadOncePerMinuteOnProfileEnabledMice() {
-        let now = Date()
-        XCTAssertTrue(BridgeClient.bluetoothMappedPowerTelemetryIsDue(lastReadAt: nil, now: now))
-        XCTAssertFalse(BridgeClient.bluetoothMappedPowerTelemetryIsDue(lastReadAt: now.addingTimeInterval(-59), now: now))
-        XCTAssertTrue(BridgeClient.bluetoothMappedPowerTelemetryIsDue(lastReadAt: now.addingTimeInterval(-60), now: now))
-        XCTAssertTrue(BridgeClient.bluetoothMappedPowerTelemetryIsDue(lastReadAt: now.addingTimeInterval(-300), now: now))
-    }
 }

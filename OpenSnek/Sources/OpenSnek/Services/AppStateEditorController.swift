@@ -10,7 +10,7 @@ import OpenSnekCore
     let buttonSlots: [ButtonSlotDescriptor]
     @WeakBound("AppStateEditorController", dependency: "applyController") var applyController: AppStateApplyController
 
-    let preferenceStore = DevicePreferenceStore()
+    let preferenceStore: DevicePreferenceStore
     var isHydrating = false
     var hydratedLightingStateByDeviceID: Set<String> = []
     var hydratedSoftwareLightingPreferencesByDeviceID: Set<String> = []
@@ -57,11 +57,12 @@ import OpenSnekCore
     var lastDPITraceLineByAction: [String: String] = [:]
     var isTearingDown = false
 
-    init(environment: AppEnvironment, deviceStore: DeviceStore, editorStore: EditorStore, buttonSlots: [ButtonSlotDescriptor]) {
+    init(environment: AppEnvironment, deviceStore: DeviceStore, editorStore: EditorStore, buttonSlots: [ButtonSlotDescriptor], preferenceStore: DevicePreferenceStore = DevicePreferenceStore()) {
         self.environment = environment
         self.deviceStore = deviceStore
         self.editorStore = editorStore
         self.buttonSlots = buttonSlots
+        self.preferenceStore = preferenceStore
     }
 
     func tearDown() {
@@ -212,7 +213,7 @@ import OpenSnekCore
         case .openSnekProfile(let id): return preferenceStore.loadOpenSnekButtonProfiles().first(where: { $0.id == id })?.name ?? "Deleted Profile"
         case .mouseSlot(let slot):
             if editorStore.supportsMultipleOnboardProfiles { return slot == 1 ? "Current Buttons" : "Stored Slot \(slot)" }
-            return "This Mouse"
+            return "This Device"
         }
     }
 

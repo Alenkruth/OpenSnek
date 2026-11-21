@@ -11,6 +11,20 @@ extension BridgeClient {
         let charging: Bool?
     }
 
+    /// Independent timestamps keep a slow vendor read from undoing a newer cable event.
+    struct BluetoothBatterySample: Sendable {
+        var attemptedAt = Date.distantPast
+        var raw: Int?
+        var charging: Bool?
+        private var chargingObservedAt = Date.distantPast
+
+        mutating func observeCharging(_ value: Bool?, at date: Date) {
+            guard let value, date >= chargingObservedAt else { return }
+            charging = value
+            chargingObservedAt = date
+        }
+    }
+
     func resolvedDeviceProfile(for device: MouseDevice) -> DeviceProfile? { DeviceProfiles.resolve(vendorID: device.vendor_id, productID: device.product_id, transport: device.transport) }
 
     func usesExtendedProfileSessionHandling(_ device: MouseDevice) -> Bool { resolvedDeviceProfile(for: device)?.usesExtendedProfileSessionHandling == true }
@@ -57,19 +71,18 @@ extension BridgeClient {
         let usesNagaBattery = device.transport == .bluetooth && profileID?.usesNagaBluetoothBatteryTelemetry == true
         // The V3 Pro 35K reported raw 0x7B over Bluetooth, so its byte is on the 0-255 scale even below 100.
         let isV3Pro35KBluetooth = device.transport == .bluetooth && (profileID == .basiliskV3Pro35K || profileID == .basiliskV3Pro35KStandard || device.product_id == 0x00D8)
+        let isV4Bluetooth = device.transport == .bluetooth && profileID == .basiliskV4Hyperspeed
         let vendorPercent = vendorRaw.map { raw in
             if isV3XBluetooth { return Int((Double(min(max(raw, 0), 255)) / 255.0 * 100.0).rounded()) }
-            return (usesNagaBattery || isV3Pro35KBluetooth || raw > 100) ? Int((Double(raw) / 255.0) * 100.0) : raw
+            return (usesNagaBattery || isV3Pro35KBluetooth || isV4Bluetooth || raw > 100) ? Int((Double(raw) / 255.0) * 100.0) : raw
         }
         let charging: Bool?
         if device.transport == .bluetooth, device.profile_id == .basiliskV3XHyperspeed || device.product_id == 0x00BA {
             charging = false
         } else if device.transport == .bluetooth, device.profile_id == .orochiV2 || device.product_id == 0x0095 {
             charging = false
-        } else if isBasiliskV3ProFamilyBluetooth(device) {
-            charging = usbFallback?.1
-        } else if usesNagaBattery {
-            // The vendor status bit is unreliable on this family; only trust a USB fallback session.
+        } else if device.hasRechargeableBattery {
+            // The legacy status key also returns 1 on battery power. A separate charging read takes precedence at the call site.
             charging = usbFallback?.1
         } else {
             charging = vendorStatus.map { $0 == 1 } ?? usbFallback?.1
@@ -92,6 +105,7 @@ extension BridgeClient {
     }
 
     func btReadLightingColor(device: MouseDevice, ledID: UInt8) async throws -> RGBPatch? {
+        guard device.supportsLightingColorControls else { return nil }
         let key: BLEVendorProtocol.Key
         if usesBluetoothZoneStateLighting(device) { key = .lightingZoneStateGet(ledID: ledID) } else { key = .lightingFrameGet }
 
@@ -129,31 +143,30 @@ extension BridgeClient {
                 ?? btDpiSnapshotByDeviceID[device.id].map { snapshot in BLEVendorProtocol.DpiStagesRead(active: snapshot.active, count: snapshot.count, values: Array(snapshot.slots.prefix(snapshot.count)), pairs: Array(snapshot.pairs.prefix(snapshot.count)), marker: snapshot.marker) }
         }
         let shouldPollGenericTelemetry = Self.shouldPollBluetoothGenericTelemetryForReadState(supportsMappedOnboardProfiles: supportsMappedOnboardProfiles)
-        // Profile-enabled mice skip the telemetry sweep on each refresh, because profile reads supply DPI and lighting.
-        // Battery and sleep timeout need an occasional read, or they do not appear.
-        let refreshesPowerTelemetry = !shouldPollGenericTelemetry && usesExtendedProfileSessionHandling(device) && Self.bluetoothMappedPowerTelemetryIsDue(lastReadAt: btMappedPowerTelemetryReadAtByDeviceID[device.id], now: Date())
-        let previousState = lastStateByDeviceID[device.id]
         let batteryRaw: Int?
+        var cableCharging: Bool?
         let batteryStatus: Int?
         let lighting: Int?
         let sleepTimeout: Int?
-        if !shouldPollGenericTelemetry {
-            if refreshesPowerTelemetry {
-                batteryRaw = (try? await btGetScalar(device: device, key: .batteryRaw, size: 1)) ?? nil
-                batteryStatus = (try? await btGetScalar(device: device, key: .batteryStatus, size: 1)) ?? nil
-                sleepTimeout = (try? await btGetScalar(device: device, key: .powerTimeoutGet, size: 2)) ?? nil
-                btMappedPowerTelemetryReadAtByDeviceID[device.id] = Date()
-            } else {
-                batteryRaw = nil
-                batteryStatus = nil
-                sleepTimeout = nil
+        if device.hasRechargeableBattery {
+            let sample = await rechargeableBluetoothBattery(device: device) {
+                let raw = try? await self.btGetScalar(device: device, key: .batteryRaw, size: 1)
+                let payload = try? await self.btReadPayload(device: device, key: .chargingStatus)
+                return (raw, BLEVendorProtocol.parseChargingStatus(payload))
             }
-            lighting = nil
+            batteryRaw = sample?.raw
+            cableCharging = sample?.charging
+            batteryStatus = nil
         } else {
             batteryRaw = (try? await btGetScalar(device: device, key: .batteryRaw, size: 1)) ?? nil
             batteryStatus = (try? await btGetScalar(device: device, key: .batteryStatus, size: 1)) ?? nil
+        }
+        if shouldPollGenericTelemetry {
             lighting = supportsLighting ? (try? await btGetLightingValue(device: device)) : nil
             sleepTimeout = (try? await btGetScalar(device: device, key: .powerTimeoutGet, size: 2)) ?? nil
+        } else {
+            lighting = nil
+            sleepTimeout = nil
         }
         let activeOnboardProfile = profile?.supportsMappedOnboardProfileCRUD == true ? (try? await btReadActiveOnboardProfileID(device: device)) ?? nil : nil
 
@@ -161,8 +174,7 @@ extension BridgeClient {
         let batteryState = Self.resolveBluetoothBatteryState(device: device, vendorRaw: batteryRaw, vendorStatus: batteryStatus, usbFallback: usbBatteryFallback)
 
         return MouseState(
-            device: DeviceSummary(id: device.id, product_name: device.product_name, serial: device.serial, transport: device.transport, firmware: nil), connection: "Bluetooth", battery_percent: batteryState.percent ?? (shouldPollGenericTelemetry ? nil : previousState?.battery_percent),
-            charging: batteryState.charging ?? (shouldPollGenericTelemetry ? nil : previousState?.charging),
+            device: DeviceSummary(id: device.id, product_name: device.product_name, serial: device.serial, transport: device.transport, firmware: nil), connection: "Bluetooth", battery_percent: batteryState.percent, charging: cableCharging ?? batteryState.charging,
             dpi: {
                 guard let active = btStages?.active, let values = btStages?.values, active >= 0, active < values.count else { return nil }
                 if let pairs = btStages?.pairs, active < pairs.count { return pairs[active] }
@@ -174,11 +186,22 @@ extension BridgeClient {
 
     nonisolated static func shouldPollBluetoothGenericTelemetryForReadState(supportsMappedOnboardProfiles: Bool) -> Bool { !supportsMappedOnboardProfiles }
 
-    /// Mice that opt in read battery and sleep timeout about once each minute. The previous battery values stay between reads.
-    /// The sleep timeout is editable, so a refresh without a read must not return an older value to the editor.
-    nonisolated static func bluetoothMappedPowerTelemetryIsDue(lastReadAt: Date?, now: Date, interval: TimeInterval = 60) -> Bool {
-        guard let lastReadAt else { return true }
-        return now.timeIntervalSince(lastReadAt) >= interval
+    /// Battery telemetry is device-wide and has a separate cadence from profile and settings reads.
+    func rechargeableBluetoothBattery(device: MouseDevice, now: Date = Date(), read: () async -> (raw: Int?, charging: Bool?)) async -> BluetoothBatterySample? {
+        guard device.transport == .bluetooth, device.hasRechargeableBattery else { return nil }
+        if let sample = rechargeableBluetoothBatteryByDeviceID[device.id], now.timeIntervalSince(sample.attemptedAt) < 30 { return sample }
+        rechargeableBluetoothBatteryByDeviceID[device.id, default: BluetoothBatterySample()].attemptedAt = now
+        let result = await read()
+        guard var sample = rechargeableBluetoothBatteryByDeviceID[device.id], sample.attemptedAt == now else { return rechargeableBluetoothBatteryByDeviceID[device.id] }
+        if let raw = result.raw { sample.raw = raw }
+        sample.observeCharging(result.charging, at: now)
+        rechargeableBluetoothBatteryByDeviceID[device.id] = sample
+        return sample
+    }
+
+    func recordBluetoothCharging(_ charging: Bool, deviceID: String, observedAt: Date) {
+        rechargeableBluetoothBatteryByDeviceID[deviceID, default: BluetoothBatterySample()].observeCharging(charging, at: observedAt)
+        lastStateByDeviceID[deviceID]?.charging = rechargeableBluetoothBatteryByDeviceID[deviceID]?.charging
     }
 
     func buildBluetoothDeltaState(device: MouseDevice, includeDpi: Bool, includeLighting: Bool, includePower: Bool) async throws -> MouseState {
@@ -308,7 +331,7 @@ extension BridgeClient {
             }
         }
 
-        if let snap = BLEVendorProtocol.parseDpiStageSnapshot(blob: payload) { btDpiSnapshotByDeviceID[device.id] = snap }
+        if let snap = BLEVendorProtocol.parseDpiStageSnapshot(blob: payload) { btDpiSnapshotByDeviceID[device.id] = device.profile_id == .basiliskV4Hyperspeed ? BLEVendorProtocol.preservingDpiWriteBaseline(snap, previous: btDpiSnapshotByDeviceID[device.id]?.writeBaseline) : snap }
         AppLog.debug("Bridge", "btGetDpiStages device=\(device.id) active=\(parsed.active) values=\(parsed.values)")
         return parsed
     }
@@ -325,8 +348,9 @@ extension BridgeClient {
             AppLog.debug("Bridge", "btGetDpiStageSnapshot parse-failed device=\(device.id) req=\(req) payload=\(btHex(payload)) " + "notifies=\(btNotifySummary(notifies))")
             return nil
         }
-        btDpiSnapshotByDeviceID[device.id] = parsed
-        return parsed
+        let snapshot = device.profile_id == .basiliskV4Hyperspeed ? BLEVendorProtocol.preservingDpiWriteBaseline(parsed, previous: btDpiSnapshotByDeviceID[device.id]?.writeBaseline) : parsed
+        btDpiSnapshotByDeviceID[device.id] = snapshot
+        return snapshot
     }
 
     func btSetDpiStages(device: MouseDevice, active: Int, values: [Int], pairs: [DpiPair]? = nil) async throws -> Bool {
@@ -340,18 +364,33 @@ extension BridgeClient {
         let requestedPairs = pairs ?? values.map { DpiPair(x: $0, y: $0) }
         let mergedPairs = BLEVendorProtocol.mergedStagePairs(currentPairs: currentPairs, requestedCount: count, requestedPairs: requestedPairs, profileID: device.profile_id)
 
-        let payload = BLEVendorProtocol.buildDpiStagePayload(active: active, count: count, pairs: mergedPairs, marker: marker, stageIDs: currentStageIDs, profileID: device.profile_id)
+        let payload: Data
+        if device.profile_id == .basiliskV4Hyperspeed {
+            guard let baseline = current?.writeBaseline, let preserved = BLEVendorProtocol.buildPreservingDpiStagePayload(baseline: baseline, active: active, count: count, pairs: requestedPairs, profileID: .basiliskV4Hyperspeed) else {
+                throw BridgeError.commandFailed("A complete Bluetooth DPI baseline is required before changing this device")
+            }
+            payload = preserved
+        } else {
+            payload = BLEVendorProtocol.buildDpiStagePayload(active: active, count: count, pairs: mergedPairs, marker: marker, stageIDs: currentStageIDs, profileID: device.profile_id)
+        }
         let req = nextBTReq()
         let header = BLEVendorProtocol.buildWriteHeader(req: req, payloadLength: 0x26, key: .dpiStagesSet)
         let notifies = try await btExchange([header, payload.prefix(20), payload.suffix(from: 20)], timeout: 0.9, device: device)
         let ok = btAckSuccess(notifies: notifies, req: req)
+        if ok, device.profile_id == .basiliskV4Hyperspeed {
+            btDpiSnapshotByDeviceID[device.id] = BLEVendorProtocol.parseDpiStageSnapshot(blob: payload)
+            guard let readback = try await btGetDpiStageSnapshot(device: device), let raw = readback.sourcePayload else { throw BridgeError.commandFailed("Bluetooth DPI readback was missing") }
+            guard raw == payload.prefix(raw.count), readback.active == active, readback.count == count else { throw BridgeError.commandFailed("Bluetooth DPI readback mismatch expected=\(btHex(payload)) actual=\(btHex(raw)) active=\(readback.active)/\(active) count=\(readback.count)/\(count)") }
+            btExpectedDpiByDeviceID[device.id] = nil
+            return true
+        }
         AppLog.debug("Bridge", "btSetDpiStages device=\(device.id) reqActive=\(active) reqValues=\(values) count=\(count) ok=\(ok)")
         if ok {
             let previousSnapshot = btDpiSnapshotByDeviceID[device.id]
             let expectedActive = max(0, min(count - 1, active))
             let expectedPairs = Array(mergedPairs.prefix(count))
             let expectedValues = expectedPairs.map(\.x)
-            btDpiSnapshotByDeviceID[device.id] = BLEVendorProtocol.DpiStageSnapshot(active: expectedActive, count: count, slots: mergedPairs.map(\.x), pairs: mergedPairs, stageIDs: currentStageIDs, marker: marker)
+            btDpiSnapshotByDeviceID[device.id] = BLEVendorProtocol.DpiStageSnapshot(active: expectedActive, count: count, slots: mergedPairs.map(\.x), pairs: mergedPairs, stageIDs: currentStageIDs, marker: marker, sourcePayload: payload)
             btExpectedDpiByDeviceID[device.id] = BluetoothExpectedDpiState(
                 active: expectedActive, values: expectedValues, pairs: expectedPairs, previousActive: previousSnapshot?.active, previousValues: previousSnapshot.map { Array($0.slots.prefix($0.count)) }, previousPairs: previousSnapshot.map { Array($0.pairs.prefix($0.count)) },
                 expiresAt: Date().addingTimeInterval(1.2), remainingMasks: 4)
@@ -440,11 +479,25 @@ extension BridgeClient {
     }
 
     func btSetButtonBinding(_ request: BluetoothButtonBindingWrite) async throws -> Bool {
+        if request.device.profile_id == .basiliskV4Hyperspeed, !DeviceProfiles.basiliskV4HyperspeedBluetooth.buttonLayout.isEditable(Int(request.slot)) { return false }
         guard request.kind != .default || ButtonBindingSupport.supportsDefaultRestore(for: Int(request.slot), profileID: request.device.profile_id) else { return false }
         let payload = BLEVendorProtocol.buildButtonPayload(slot: request.slot, kind: request.kind, hidKey: request.hidKey, hidModifiers: request.hidModifiers, turboEnabled: request.turboEnabled, turboRate: request.turboRate, clutchDPI: request.clutchDPI, profileID: request.device.profile_id)
         let req = nextBTReq()
         let header = BLEVendorProtocol.buildWriteHeader(req: req, payloadLength: 0x0A, key: .buttonBind(slot: request.slot))
         let notifies = try await btExchange([header, payload], timeout: 0.9, device: request.device)
-        return btAckSuccess(notifies: notifies, req: req)
+        guard btAckSuccess(notifies: notifies, req: req) else {
+            if request.device.profile_id == .basiliskV4Hyperspeed { throw BridgeError.commandFailed("Bluetooth button write rejected slot=\(request.slot) req=\(req) notifies=\(btNotifySummary(notifies))") }
+            return false
+        }
+        if request.device.profile_id == .basiliskV4Hyperspeed {
+            let read = nextBTReq()
+            let frames = try await btExchange([BLEVendorProtocol.buildReadHeader(req: read, key: .buttonBindGet(target: 1, slot: request.slot))], timeout: 0.9, device: request.device)
+            guard let data = BLEVendorProtocol.parsePayloadFrames(notifies: frames, req: read), let block = BLEVendorProtocol.extractBluetoothFunctionBlock(payload: data, target: 1, slot: request.slot, profileID: .basiliskV4Hyperspeed) else {
+                throw BridgeError.commandFailed("Bluetooth button readback missing slot=\(request.slot) req=\(read) notifies=\(btNotifySummary(frames))")
+            }
+            guard block == Array(payload.suffix(7)) else { throw BridgeError.commandFailed("Bluetooth button readback mismatch slot=\(request.slot) expected=\(btHex(payload.suffix(7))) actual=\(btHex(Data(block)))") }
+            return true
+        }
+        return true
     }
 }

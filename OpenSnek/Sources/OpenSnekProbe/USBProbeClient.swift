@@ -67,7 +67,10 @@ final class USBProbeClient: @unchecked Sendable {
         let brightness = UInt8(max(0, min(255, value)))
         return try targets.map { target in
             let args = [0x01, target.ledID, brightness]
-            return USBLightingWriteResult(target: target, args: args, succeeded: try writeLightingCommand(cmdID: 0x04, args: args))
+            let acknowledged = try writeLightingCommand(cmdID: 0x04, args: args)
+            let succeeded: Bool
+            if acknowledged, profileID == .basiliskV4Hyperspeed { succeeded = try readLightingBrightness(ledID: 0x0A) == Int(brightness) } else { succeeded = acknowledged }
+            return USBLightingWriteResult(target: target, args: args, succeeded: succeeded)
         }
     }
 
@@ -75,7 +78,15 @@ final class USBProbeClient: @unchecked Sendable {
         guard let targets = lightingTargets(zoneID: zoneID) else { return nil }
         return try targets.map { target in
             let args = BLEVendorProtocol.buildScrollLEDEffectArgs(effect: effect, ledID: target.ledID)
-            return USBLightingWriteResult(target: target, args: args, succeeded: try writeLightingCommand(cmdID: 0x02, args: args))
+            let acknowledged = try writeLightingCommand(cmdID: 0x02, args: args)
+            let succeeded: Bool
+            if acknowledged, profileID == .basiliskV4Hyperspeed {
+                let response = try rawCommand(classID: 15, cmdID: 0x82, size: 12, args: [1, 0])
+                succeeded = response.map { USBHIDProtocol.basiliskV4LightingWriteMatches(response: $0, args: args) } ?? false
+            } else {
+                succeeded = acknowledged
+            }
+            return USBLightingWriteResult(target: target, args: args, succeeded: succeeded)
         }
     }
 
@@ -275,8 +286,8 @@ final class USBProbeClient: @unchecked Sendable {
     }
 
     func writeProfileDPIScalar(profile: UInt8, pair: DpiPair) throws -> Bool {
-        let dpiX = max(100, min(30_000, pair.x))
-        let dpiY = max(100, min(30_000, pair.y))
+        let dpiX = DeviceProfiles.clampDPI(pair.x, profileID: profileID)
+        let dpiY = DeviceProfiles.clampDPI(pair.y, profileID: profileID)
         let args: [UInt8] = [profile, UInt8((dpiX >> 8) & 0xFF), UInt8(dpiX & 0xFF), UInt8((dpiY >> 8) & 0xFF), UInt8(dpiY & 0xFF), 0x00, 0x00]
         guard let response = try rawCommand(classID: 0x04, cmdID: 0x05, size: 0x07, args: args) else { return false }
         return writeEchoMatches(response: response, classID: 0x04, cmdID: 0x05, args: args)

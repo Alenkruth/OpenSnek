@@ -3,6 +3,18 @@ import OpenSnekCore
 
 /// Defines BLE vendor protocol values.
 public enum BLEVendorProtocol {
+    /// The charging register has a single binary payload byte when supported.
+    public static func parseChargingStatus(_ payload: Data?) -> Bool? {
+        guard let payload, payload.count == 1, let byte = payload.first, byte <= 1 else { return nil }
+        return byte == 1
+    }
+
+    /// Cable power transitions on the Bluetooth HID mouse interface.
+    public static func cableChargingState(report: [UInt8]) -> Bool? {
+        guard report.count == 9, report.starts(with: [0x05, 0x05, 0x0C]), report[3] <= 1 else { return nil }
+        return report[3] == 1
+    }
+
     public static let serviceUUID = UUID(uuidString: "52401523-F97C-7F90-0E7F-6C6F4E36DB1C")!
     public static let writeUUID = UUID(uuidString: "52401524-F97C-7F90-0E7F-6C6F4E36DB1C")!
     public static let notifyUUID = UUID(uuidString: "52401525-F97C-7F90-0E7F-6C6F4E36DB1C")!
@@ -30,15 +42,26 @@ public enum BLEVendorProtocol {
         public let pairs: [DpiPair]
         public let stageIDs: [UInt8]
         public let marker: UInt8
+        public let sourcePayload: Data?
+        public let writeBaseline: Data?
 
-        public init(active: Int, count: Int, slots: [Int], pairs: [DpiPair], stageIDs: [UInt8] = [], marker: UInt8 = 0x03) {
+        public init(active: Int, count: Int, slots: [Int], pairs: [DpiPair], stageIDs: [UInt8] = [], marker: UInt8 = 0x03, sourcePayload: Data? = nil, writeBaseline: Data? = nil) {
             self.active = active
             self.count = count
             self.slots = slots
             self.pairs = pairs
             self.stageIDs = stageIDs
             self.marker = marker
+            self.sourcePayload = sourcePayload
+            self.writeBaseline = writeBaseline ?? sourcePayload.flatMap { $0.count >= 36 ? $0 : nil }
         }
+    }
+
+    /// Short V4 reads omit hidden stages. Retain only previously observed bytes, never synthesize them.
+    public static func preservingDpiWriteBaseline(_ snapshot: DpiStageSnapshot, previous: Data?) -> DpiStageSnapshot {
+        guard let raw = snapshot.sourcePayload, raw.count == 1 + snapshot.count * 7, raw.count < 36, var baseline = previous, (36...38).contains(baseline.count) else { return snapshot }
+        baseline.replaceSubrange(0..<raw.count, with: raw)
+        return DpiStageSnapshot(active: snapshot.active, count: snapshot.count, slots: snapshot.slots, pairs: snapshot.pairs, stageIDs: snapshot.stageIDs, marker: snapshot.marker, sourcePayload: raw, writeBaseline: baseline)
     }
 
     /// Stores DPI stages read data.
@@ -86,6 +109,7 @@ public enum BLEVendorProtocol {
         public static let powerTimeoutSet = Key(b0: 0x05, b1: 0x04, b2: 0x00, b3: 0x00)
         public static let batteryRaw = Key(b0: 0x05, b1: 0x81, b2: 0x00, b3: 0x01)
         public static let batteryStatus = Key(b0: 0x05, b1: 0x80, b2: 0x00, b3: 0x01)
+        public static let chargingStatus = Key(b0: 0x05, b1: 0x85, b2: 0x00, b3: 0x01)
 
         public static func buttonBind(slot: UInt8) -> Key { Key(b0: 0x08, b1: 0x04, b2: 0x01, b3: slot) }
 
@@ -261,6 +285,7 @@ public enum BLEVendorProtocol {
             if tail.count >= 14 {
                 let evenLane = Array(tail.enumerated().compactMap { index, byte in index.isMultiple(of: 2) ? byte : nil }.prefix(7))
                 let oddLane = Array(tail.enumerated().compactMap { index, byte in index.isMultiple(of: 2) ? nil : byte }.prefix(7))
+                if profileID == .basiliskV4Hyperspeed { return evenLane }
                 let lanes = [evenLane, oddLane]
                 if let parsed = lanes.first(where: { ButtonBindingSupport.buttonBindingDraftFromUSBFunctionBlock(slot: Int(slot), functionBlock: $0, profileID: profileID) != nil }) { return parsed }
                 return evenLane
@@ -311,7 +336,8 @@ public enum BLEVendorProtocol {
             let count = min(declaredCount, slots.count)
             let visibleIDs = Array(stageIDs.prefix(count))
             let active = resolveActiveStage(activeRaw: activeRaw, stageIDs: visibleIDs, count: count)
-            return DpiStageSnapshot(active: active, count: count, slots: Array(slots.prefix(DeviceProfiles.maximumDpiStageCount)), pairs: Array(pairs.prefix(DeviceProfiles.maximumDpiStageCount)), stageIDs: Array(stageIDs.prefix(DeviceProfiles.maximumDpiStageCount)), marker: marker)
+            return DpiStageSnapshot(
+                active: active, count: count, slots: Array(slots.prefix(DeviceProfiles.maximumDpiStageCount)), pairs: Array(pairs.prefix(DeviceProfiles.maximumDpiStageCount)), stageIDs: Array(stageIDs.prefix(DeviceProfiles.maximumDpiStageCount)), marker: marker, sourcePayload: blob)
         }
 
         if blob.count >= 7 {
@@ -320,9 +346,11 @@ public enum BLEVendorProtocol {
             let value = Int(blob[3]) | (Int(blob[4]) << 8)
             let active = activeRaw >= 1 ? max(0, min(count - 1, activeRaw - 1)) : 0
             let sid = blob.count > 2 ? blob[2] : 0
-            let pair = DpiPair(x: value, y: value)
+            let y = Int(blob[5]) | (Int(blob[6]) << 8)
+            let pair = DpiPair(x: value, y: y)
             return DpiStageSnapshot(
-                active: active, count: count, slots: Array(repeating: value, count: DeviceProfiles.maximumDpiStageCount), pairs: Array(repeating: pair, count: DeviceProfiles.maximumDpiStageCount), stageIDs: Array(repeating: sid, count: DeviceProfiles.maximumDpiStageCount), marker: 0x03)
+                active: active, count: count, slots: Array(repeating: value, count: DeviceProfiles.maximumDpiStageCount), pairs: Array(repeating: pair, count: DeviceProfiles.maximumDpiStageCount), stageIDs: Array(repeating: sid, count: DeviceProfiles.maximumDpiStageCount), marker: 0x03,
+                sourcePayload: blob)
         }
 
         return nil
@@ -406,9 +434,38 @@ public enum BLEVendorProtocol {
         return out
     }
 
+    /// Edits the V4 table without rebuilding opaque per-stage bytes or hidden stages.
+    /// A complete baseline is mandatory; malformed reads cannot become writes of defaults.
+    public static func buildPreservingDpiStagePayload(baseline: Data, active: Int, count: Int, pairs: [DpiPair], profileID: DeviceProfileID) -> Data? {
+        guard (36...38).contains(baseline.count), (1...5).contains(Int(baseline[1])), (1...5).contains(count), pairs.count >= count, (0..<count).contains(active) else { return nil }
+        let ids = (0..<5).map { baseline[2 + $0 * 7] }
+        guard Set(ids).count == 5, ids.prefix(Int(baseline[1])).contains(baseline[0]) else { return nil }
+        let range = DeviceProfiles.dpiRange(for: profileID)
+        for index in 0..<5 {
+            let offset = 2 + index * 7
+            let x = Int(baseline[offset + 1]) | Int(baseline[offset + 2]) << 8
+            let y = Int(baseline[offset + 3]) | Int(baseline[offset + 4]) << 8
+            guard range.contains(x), range.contains(y) else { return nil }
+        }
+        var payload = baseline + Data(repeating: 0, count: 38 - baseline.count)
+        payload[0] = ids[active]
+        payload[1] = UInt8(count)
+        for index in 0..<count {
+            let offset = 2 + index * 7
+            let pair = pairs[index]
+            let x = DeviceProfiles.clampDPI(pair.x, profileID: profileID)
+            let y = DeviceProfiles.clampDPI(pair.y, profileID: profileID)
+            payload[offset + 1] = UInt8(x & 0xFF)
+            payload[offset + 2] = UInt8(x >> 8)
+            payload[offset + 3] = UInt8(y & 0xFF)
+            payload[offset + 4] = UInt8(y >> 8)
+        }
+        return payload
+    }
+
     public static func buildButtonPayload(slot: UInt8, kind: ButtonBindingKind, hidKey: UInt8?, hidModifiers: UInt8 = 0, turboEnabled: Bool = false, turboRate: UInt16? = nil, clutchDPI: Int? = nil, profileID: DeviceProfileID? = nil) -> Data {
         let clampedTurboRate = max(UInt16(1), min(UInt16(0x00FF), turboRate ?? 0x008E))
-        if profileID?.isNagaFamily == true {
+        if profileID?.isNagaFamily == true || profileID == .basiliskV4Hyperspeed {
             let draft = ButtonBindingDraft(kind: kind, hidKey: Int(hidKey ?? 0x04), hidModifiers: Int(hidModifiers), turboEnabled: turboEnabled, turboRate: Int(clampedTurboRate), clutchDPI: clutchDPI)
             return buildRawFunctionBlockPayload(slot: slot, functionBlock: ButtonBindingSupport.usbFunctionBlockForWrite(slot: Int(slot), draft: draft, profileID: profileID))
         }
@@ -416,17 +473,18 @@ public enum BLEVendorProtocol {
             let clamped = UInt16(DeviceProfiles.clampDPI(clutchDPI ?? ButtonBindingSupport.defaultBasiliskDPIClutchDPI, profileID: profileID ?? .basiliskV3Pro))
             return (UInt8((clamped >> 8) & 0xFF), UInt8(clamped & 0xFF))
         }
+        let keyboard = ButtonBindingSupport.keyboardWireBytes(hidKey: Int(hidKey ?? 0x04), hidModifiers: Int(hidModifiers))
         if turboEnabled {
-            if kind == .keyboardSimple {
-                let key = hidKey ?? 0x04
-                return Data([0x01, slot, 0x00, 0x0D, 0x04, hidModifiers, key, 0x00, UInt8(clampedTurboRate & 0xFF), UInt8((clampedTurboRate >> 8) & 0xFF)])
-            }
-            if let buttonID = horizontalScrollButtonID(for: kind) { return buildRawFunctionBlockPayload(slot: slot, functionBlock: [0x0E, 0x03, buttonID, 0x00, UInt8(clampedTurboRate & 0xFF), 0x00, 0x00]) }
-            if let buttonID = mouseButtonID(for: kind) {
-                let index = UInt16(max(0, Int(buttonID) - 1))
-                let p0 = UInt16((index << 8) | 0x0003)
-                return Data([0x01, slot, 0x00, 0x0E, UInt8(p0 & 0xFF), UInt8((p0 >> 8) & 0xFF), UInt8(clampedTurboRate & 0xFF), UInt8((clampedTurboRate >> 8) & 0xFF), 0x00, 0x00])
-            }
+            if kind == .keyboardSimple { return Data([0x01, slot, 0x00, 0x0D, 0x04, keyboard.modifiers, keyboard.key, 0x00, UInt8(clampedTurboRate & 0xFF), UInt8((clampedTurboRate >> 8) & 0xFF)]) }
+            if let buttonID = horizontalScrollButtonID(for: kind) { return buildTurboMousePayload(slot: slot, target: buttonID, turboRate: clampedTurboRate) }
+            // Wheel up/down are wheel functions rather than HID buttons: the firmware's `0x0E` target
+            // byte keeps the raw wheel action id, the same way wheel tilt keeps `0x68`/`0x69`. Treating
+            // them as body buttons writes `0x08` for wheel-down, which is not a valid target and leaves
+            // that wheel direction inert. See captures/ble/right-click-turbo.pcapng (body buttons use
+            // the 0-based `button_id - 1`) and the tilt read-back in
+            // captures/ble/windows/2026-06-15-224531-profile-synapse-startup-takeover-pass-1/summary.md.
+            if let wheelButtonID = wheelScrollButtonID(for: kind) { return buildTurboMousePayload(slot: slot, target: wheelButtonID, turboRate: clampedTurboRate) }
+            if let buttonID = mouseButtonID(for: kind) { return buildTurboMousePayload(slot: slot, target: UInt8(max(0, Int(buttonID) - 1)), turboRate: clampedTurboRate) }
         }
 
         switch kind {
@@ -448,7 +506,7 @@ public enum BLEVendorProtocol {
         case .scrollRight: return buildRawFunctionBlockPayload(slot: slot, functionBlock: [0x0E, 0x03, 0x69, 0x00, basiliskV3FamilyHorizontalScrollTurboRate, 0x00, 0x00])
         case .mouseBack: return Data([0x01, slot, 0x00, 0x01, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00])
         case .mouseForward: return Data([0x01, slot, 0x00, 0x01, 0x01, 0x05, 0x00, 0x00, 0x00, 0x00])
-        case .keyboardSimple: return Data([0x01, slot, 0x00, 0x02, 0x02, hidModifiers, hidKey ?? 0x04, 0x00, 0x00, 0x00])
+        case .keyboardSimple: return Data([0x01, slot, 0x00, 0x02, 0x02, keyboard.modifiers, keyboard.key, 0x00, 0x00, 0x00])
         case .mediaPlayPause, .mediaNextTrack, .mediaPreviousTrack, .mediaVolumeUp, .mediaVolumeDown, .mediaMute:
             let usage = kind.consumerUsage ?? 0
             return Data([0x01, slot, 0x00, 0x0A, 0x02, UInt8((usage >> 8) & 0xFF), UInt8(usage & 0xFF), 0x00, 0x00, 0x00])
@@ -556,10 +614,26 @@ public enum BLEVendorProtocol {
 
     private static func buildRawFunctionBlockPayload(slot: UInt8, functionBlock: [UInt8]) -> Data { Data([0x01, slot, 0x00] + functionBlock) }
 
+    /// Builds the `0x0E` mouse-turbo payload with the same block layout Synapse writes on Bluetooth:
+    /// `[class=0x0E][len=0x03][target][rate_hi][rate_lo][0x00][0x00]`, i.e. the rate stays big-endian
+    /// in function-block bytes 3-4. `captures/ble/right-click-turbo.pcapng` shows
+    /// `01 02 00 0e 03 01 00 8e 00 00` for slot `0x02` at rate `0x008E`; the earlier encoder emitted
+    /// the rate as `rate_lo, rate_hi` (`... 03 01 8e 00 ...`), so the device read `0x8E00`.
+    private static func buildTurboMousePayload(slot: UInt8, target: UInt8, turboRate: UInt16) -> Data { buildRawFunctionBlockPayload(slot: slot, functionBlock: [0x0E, 0x03, target, UInt8((turboRate >> 8) & 0xFF), UInt8(turboRate & 0xFF), 0x00, 0x00]) }
+
     private static func horizontalScrollButtonID(for kind: ButtonBindingKind) -> UInt8? {
         switch kind {
         case .scrollLeft: return 0x68
         case .scrollRight: return 0x69
+        default: return nil
+        }
+    }
+
+    /// Returns the raw wheel-action id used as the `0x0E` turbo target for wheel up/down.
+    private static func wheelScrollButtonID(for kind: ButtonBindingKind) -> UInt8? {
+        switch kind {
+        case .scrollUp: return 0x09
+        case .scrollDown: return 0x0A
         default: return nil
         }
     }

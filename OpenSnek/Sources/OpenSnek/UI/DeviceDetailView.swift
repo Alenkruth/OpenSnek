@@ -5,6 +5,7 @@ import OpenSnekCore
 
 /// Renders the device detail view UI.
 struct DeviceDetailView: View {
+    @Environment(\.isDocumentationPreview) private var isDocumentationPreview
     let deviceStore: DeviceStore
     let editorStore: EditorStore
     let selected: MouseDevice
@@ -24,7 +25,7 @@ struct DeviceDetailView: View {
     private func detailScrollView(width: CGFloat) -> some View {
         let isBusy = editorStore.isButtonProfileOperationInFlight || editorStore.isOnboardProfileLoadInFlight
         let statusText = editorStore.buttonProfileOperationStatusText ?? editorStore.onboardProfileLoadStatusText
-        return detailScrollViewBase(width: width).loadingScrim(isPresented: isBusy, label: statusText).task(id: selected.id) { await deviceStore.refreshConnectionDiagnostics(for: selected) }
+        return detailScrollViewBase(width: width).loadingScrim(isPresented: isBusy, label: statusText).task(id: selected.id) { if !isDocumentationPreview { await deviceStore.refreshConnectionDiagnostics(for: selected) } }
     }
 
     private func detailScrollViewBase(width: CGFloat) -> some View { ScrollView(.vertical) { detailContent(width: detailContentWidth(for: width)) }.accessibilityIdentifier("device-detail-scroll-view").frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(WindowDragBlocker()) }
@@ -64,7 +65,7 @@ struct DeviceDetailView: View {
         switch section {
         case .dpiStages: DpiStagesCard(editorStore: editorStore)
         case .onConnect: OnConnectBehaviorCard(editorStore: editorStore)
-        case .lighting: LightingCard(editorStore: editorStore, selected: selected, swatches: swatches, isLightingOnly: isLightingOnlyDevice)
+        case .lighting: LightingCard(editorStore: editorStore, selected: selected, swatches: swatches, isLightingOnly: isLightingOnlyDevice).zIndex(1)
         case .pollRate: PollRateCard(editorStore: editorStore)
         case .powerManagement: SleepTimeoutCard(editorStore: editorStore)
         case .lowBatteryThreshold: LowBatteryThresholdCard(editorStore: editorStore)
@@ -178,6 +179,7 @@ private struct DetailColumnsLayout: Layout {
 
 /// Stores device overview bar data.
 struct DeviceOverviewBar: View {
+    @Environment(\.isDocumentationPreview) private var isDocumentationPreview
     let deviceStore: DeviceStore
     let editorStore: EditorStore
     let selected: MouseDevice
@@ -196,14 +198,14 @@ struct DeviceOverviewBar: View {
 
                 VStack(alignment: .trailing, spacing: 8) {
                     if let battery = state.battery_percent {
-                        let batteryIcon = BatteryPresentation.icon(percent: battery, charging: state.charging, thresholdRaw: state.low_battery_threshold_raw)
+                        let batteryIcon = BatteryPresentation.icon(percent: battery, charging: deviceStore.selectedDeviceControlsEnabled ? state.charging : nil, thresholdRaw: state.low_battery_threshold_raw)
                         HStack(spacing: 8) {
-                            Image(systemName: batteryIcon.symbolName, variableValue: batteryIcon.variableValue)
+                            BatteryIconView(icon: batteryIcon)
                             Text("\(battery)%")
-                        }.font(.system(size: 24, weight: .black, design: .rounded)).foregroundStyle(batteryIcon.accent == .low ? BatteryPresentation.lowBatteryColor : .white)
+                        }.font(.system(size: 24, weight: .black, design: .rounded)).foregroundStyle(batteryIcon.accent == .low ? BatteryPresentation.lowBatteryColor : .white).batteryHoverTooltip(deviceStore.batteryHelp(for: selected, percent: battery, charging: state.charging), yOffset: 34)
                     }
                 }
-            }
+            }.zIndex(1)
 
             HStack(spacing: 10) {
                 Pill(text: state.connection, color: selected.transport == .bluetooth ? Color(hex: 0x66D9FF) : Color(hex: 0xA8F46A)).accessibilityIdentifier("selected-device-connection")
@@ -218,8 +220,8 @@ struct DeviceOverviewBar: View {
 
             Rectangle().fill(Color.white.opacity(0.14)).frame(height: 1)
         }.task(id: selected.id) {
-            guard editorStore.supportsProfilePicker else { return }
-            await editorStore.refreshOnboardProfiles()
+            guard !isDocumentationPreview, editorStore.supportsProfilePicker else { return }
+            await editorStore.prepareProfilePickerForDisplay()
         }.onChange(of: selected.id) { _, _ in isProfilePickerPresented = false }.zIndex(6)
     }
 
@@ -259,7 +261,7 @@ struct GenericDeviceDetailView: View {
 
     private var resolvedProfile: DeviceProfile? { DeviceProfiles.resolve(vendorID: selected.vendor_id, productID: selected.product_id, transport: selected.transport) }
 
-    private var primaryMessage: String { "This mouse is not fully supported yet." }
+    private var primaryMessage: String { "This device is not fully supported yet." }
 
     private var secondaryMessage: String { "OpenSnek will show the controls it can verify safely. Use Diagnostics in bug reports so unsupported devices are easier to map." }
 

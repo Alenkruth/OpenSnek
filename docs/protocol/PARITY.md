@@ -44,7 +44,7 @@ Legend:
 | DPI XY | `04:85/05` | passive HID read/listen; live apply via vendor stage writes | both scripts | PARTIAL | direct BT HID `set_dpi` is not reliable on validated stack, but OpenSnek now uses validated passive BT HID reports for immediate on-device DPI-change updates |
 | DPI stages + active stage | `04:86/06` | `0B84`/`0B04`, `op=0x26` | both scripts | DONE | OpenSnek normalizes active-stage via stage IDs and preserves USB stage IDs on writes to avoid off-by-one stage mapping. |
 | Poll rate | `00:85/05` | HID fallback only | both scripts | PARTIAL | Need BLE vendor equivalent |
-| Battery level | `07:80` | Battery Service + observed vendor read | both scripts | PARTIAL | Charging-state parity still incomplete on BLE |
+| Battery level | `07:80` | Battery Service + observed vendor read | both scripts | PARTIAL | Swift reads charging separately on rechargeable mice (`07:84` USB, `05 85 00 01` BLE). Bluetooth charging has been physically verified on the original Basilisk V3 Pro. |
 | Idle time | `07:83/03` | `05 84 00 00` / `05 04 00 00` | both scripts | DONE | BT vendor fallback implemented |
 | Low battery threshold | `07:81/01` | `05 82 00 00` / `05 02 00 00` | both scripts | DONE | BT vendor fallback implemented. OpenSnek supports read/write on USB + BT, and hides USB control when unsupported. |
 | Scroll mode | `02:94/14` | unknown vendor key | both scripts (HID path) | PARTIAL | USB profile-scoped semantics use the first command argument as storage/profile ID. OpenSnek reads/writes on USB and hides the control when unsupported. |
@@ -198,7 +198,8 @@ Validated on physical hardware by [PLus123456](https://github.com/PLus123456), n
 - working read: battery raw (`05 81 00 01`, `0x7B`, always on the 0-255 scale), battery status (`05 80 00 01`), sleep timeout (`05 84 00 00`, 300 s)
 - working write/readback: per-zone static color (`10 03 00 <led>` / `10 83 00 <led>`) and brightness (`10 05 01 <led>` / `10 85 01 <led>`) on the two physical zones `0x01` and `0x0A`; this edition has no logo LED even though `10 80 00 01` lists `0x04`
 - acknowledged button writes on slots `0x04` / `0x05` (keyboard, turbo); factory blocks for every Basilisk V3 family slot were read from the unassigned stored banks, and slot `0x0F` uses the compact clutch block `06 01 05 01 90 01 90`
-- not shipped: Bluetooth profile CRUD, because `03 84 <target> 00` metadata reads return status `0x03`; USB (`0x00D6` / `0x00D7` per OpenRazer), because it has not been exercised
+- Bluetooth profile CRUD stays hidden because `03 84 <target> 00` metadata reads return status `0x03`
+- USB cable `0x00D6` and receiver `0x00D7` now have a mapped profile, **awaiting hardware validation**. It reuses the USB family controls with a 35,000 DPI ceiling and only scroll-wheel/underglow lighting. USB custom frames and onboard profile CRUD remain hidden; Bluetooth evidence does not validate USB behavior
 - live Bluetooth writes reset on power cycle; restore-on-connect re-applies saved settings
 
 ## Contributor-Validated BT Profile (Orochi V2 BT PID `0x0095`, macOS stack)
@@ -246,3 +247,29 @@ Per feature validation should include:
 - [BLE Protocol](./BLE_PROTOCOL.md)
 - [BLE Reverse Engineering Notes](../research/BLE_REVERSE_ENGINEERING.md)
 - OpenRazer driver protocol builders (`driver/razerchromacommon.c/.h`)
+
+## Basilisk V4 HyperSpeed Bluetooth (`068E:00EC`)
+
+Local evidence: [bring-up report](../research/BASILISK_V4_HYPERSPEED_BT.md).
+DPI X/Y, count and active-ID edits, sleep, brightness and all 12 button/wheel slots
+are enabled. The V4 DPI write path edits a complete raw baseline to preserve opaque
+bytes and hidden stages, then verifies authoritative readback without command
+retries. The app and probe use the same preserving builder. Button reads use the
+current (even) lane of the interleaved payload; Default writes the captured native
+block. Brightness-only presentation and restore filtering prevent unvalidated
+color writes. Extra-button labels are receiver press-correlated; Bluetooth press
+checks remain pending. Effect, profile-CRUD, poll-rate, scroll-mode,
+persistence and physical lifecycle gaps remain explicit. Receiver support is
+documented separately below.
+
+## Basilisk V4 HyperSpeed USB receiver (`1532:00EA`)
+
+Locally validated changed-write/readback/restore: DPI X/Y and stage transitions,
+33K boundary, 125/500/1000 Hz through `00:8E/0E`, brightness through separate
+read/write LED IDs, six built-in effect bodies, sleep, threshold and all twelve remap
+slots. The app exposes all twelve slots with native Default and exact original
+restore checks. Guided presses identify slot 128 as Front Side Button, 57 as Thumb
+Paddle and 14 as Underside Button. App commands require authoritative readback. Profile CRUD, wheel
+settings and custom frames stay hidden; cable `00EB` remains unregistered.
+Physical lighting rendering, persistence and connection lifecycle were not tested.
+[Report and evidence](../research/BASILISK_V4_HYPERSPEED_USB.md).

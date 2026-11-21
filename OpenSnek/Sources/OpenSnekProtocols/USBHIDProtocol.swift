@@ -3,6 +3,12 @@ import OpenSnekCore
 
 /// Defines USB HID protocol values.
 public enum USBHIDProtocol {
+    /// Basilisk V3 Pro receiver input report 05 0c carries the wireless charger state.
+    public static func wirelessChargingState(report: [UInt8]) -> Bool? {
+        guard report.count == 16, report[0] == 0x05, report[1] == 0x0C, report[2] <= 1 else { return nil }
+        return report[2] == 1
+    }
+
     /// Stores onboard profile metadata.
     public struct OnboardProfileMetadata: Equatable, Sendable {
         public let identifier: UUID?
@@ -177,7 +183,7 @@ public enum USBHIDProtocol {
     /// charging. Charging is a separate command from the battery level: the level response's first
     /// argument does not carry the flag. OpenRazer reads the same argument.
     public static func parseChargingStatus(_ response: [UInt8]) -> Bool? {
-        guard response.count > 9, response[0] == 0x02 else { return nil }
+        guard response.count > 9, response[0] == 0x02, response[9] <= 1 else { return nil }
         return response[9] == 0x01
     }
 

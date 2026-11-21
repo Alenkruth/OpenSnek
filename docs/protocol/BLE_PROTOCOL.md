@@ -15,6 +15,7 @@ Source-of-truth rule:
 - Python tooling under `tools/python/` may contain older mappings or compatibility experiments; do not treat it as canonical when this document disagrees.
 
 Supported device baseline:
+- Basilisk V4 HyperSpeed Bluetooth (`VID=0x068E`, `PID=0x00EC`; scoped DPI/power/brightness/button support, see bring-up notes)
 - Basilisk V3 X HyperSpeed Bluetooth (`VID=0x068E`, `PID=0x00BA`)
 - Basilisk V3 Pro Bluetooth (`VID=0x068E`, `PID=0x00AC`)
 - Basilisk V3 Pro 35K Phantom Green Edition Bluetooth (`VID=0x068E`, `PID=0x00D8`, contributor validated)
@@ -42,6 +43,20 @@ is unchanged. See [hardware validation](../development/VALIDATION.md#safe-hardwa
 
 ## 2. GATT Endpoints
 
+During pairing, Bluetooth Settings can expose the vendor service before macOS publishes
+the mouse HID interface. For the Basilisk V3 Pro, OpenSnek waits for a Generic Desktop
+Mouse in IORegistry whose `PhysicalDeviceUniqueID` matches the CoreBluetooth peripheral
+UUID. This check also applies to unnamed fallback candidates. It reads registry properties
+without opening the HID interface. Vendor discovery requests only the service and the two
+characteristics listed below.
+
+In a local forget-and-re-pair check on macOS 26.5.2, both the installed
+1.4.1-rc.2 and the updated build recovered. With the updated app and background
+service running, Bluetooth Settings cancelled its own connection 54 ms after pairing.
+The mouse remained registered with HID, and OpenSnek resumed vendor reads.
+The immediate disconnect reported on macOS 26.6.1 remains unconfirmed locally.
+See [issue #147](https://github.com/gh123man/OpenSnek/issues/147).
+
 | Item | UUID | Access | Notes |
 |---|---|---|---|
 | Vendor service | `52401523-F97C-7F90-0E7F-6C6F4E36DB1C` | Service | Required |
@@ -66,6 +81,8 @@ The protocol is request/notify based, but OpenSnek treats it as strictly seriali
 - enable notifications first
 - send one logical exchange at a time
 - wait for its notify header and any payload frames
+- start response-idle completion only after receiving a notification; an ATT write
+  acknowledgement alone must not return an empty successful exchange
 - only then start the next exchange
 
 Do not pipeline requests on a single connection. The only correlation token is the one-byte request ID, and out-of-order notify interleaving is easy to create if you overlap commands.
@@ -102,7 +119,8 @@ If you are implementing a compatible client, use write-with-response unless you 
 ### 3.4 End of Exchange
 
 OpenSnek considers an exchange complete after:
-- all queued writes have been acknowledged at the ATT layer, and
+- all queued writes have been acknowledged at the ATT layer,
+- at least one response notification has arrived (except connection-only warmup), and
 - no more notify frames arrive for a short idle window
 
 That idle window is a client policy, not an on-wire field. Your client can instead finish as soon as it has:
@@ -609,9 +627,11 @@ On the Basilisk V3 Pro 35K, slot `14` is the Scroll Mode Toggle (factory block `
 | `0x02` | simple keyboard action | function data is `modifier byte, HID key` |
 | `0x06` | DPI action | `p0 = 0x0601` for slot `0x60` DPI-cycle default; `p0 = 0x0505`, `p1/p2 = dpi_be16` for Basilisk V3 Pro Bluetooth slot `0x0F` DPI clutch |
 | `0x0D` | keyboard turbo action | function data is `modifier byte, HID key, turbo rate` |
-| `0x0E` | mouse turbo action | `p0 = ((button_id - 1) << 8) | 0x0003`, `p1 = turbo rate` |
+| `0x0E` | mouse turbo action | function block `0E 03 <target> <rate_hi> <rate_lo> 00 00`; `target` is the 0-based `button_id - 1` for body buttons (`0x00` left click … `0x04` forward) but stays the raw wheel action id for wheel tilt (`0x68`/`0x69`) and wheel up/down (`0x09`/`0x0A`) |
 
-Bluetooth button-binding payloads wrap the same 7-byte function block used by USB. For keyboard actions, OpenSnek writes the Basilisk-family keyboard modifier byte at the same position used by USB captures: `0x01` left Ctrl, `0x02` left Shift, `0x04` left Alt/Option, `0x08` left GUI/Command, `0x10` right Ctrl, `0x20` right Shift, `0x40` right Alt/Option, `0x80` right GUI/Command.
+Bluetooth button-binding payloads wrap the same 7-byte function block used by USB. For keyboard actions, OpenSnek writes the Basilisk-family keyboard modifier byte at the same position used by USB captures: `0x01` left Ctrl, `0x02` left Shift, `0x04` left Alt/Option, `0x08` left GUI/Command, `0x10` right Ctrl, `0x20` right Shift, `0x40` right Alt/Option, `0x80` right GUI/Command. A modifier key bound on its own is written as its modifier bit with an empty key (Left Option: `01 <slot> 00 02 02 04 00 00 00 00`); see the keyboard notes in [USB_PROTOCOL.md](USB_PROTOCOL.md) for why the bare `0xE0`-`0xE7` usage form does not act as a held modifier on macOS.
+
+The `0x0E` turbo rate is stored big-endian in function-block bytes 3-4, exactly like the USB block: `captures/ble/right-click-turbo.pcapng` writes `01 02 00 0E 03 01 00 8E 00 00` for slot `0x02` at rate `0x008E` and `01 02 00 0E 03 01 00 3E 00 00` at rate `0x003E`, and the tilt read-backs (`0E 03 68 00 14 00 00`) carry the rate in byte 4 as well. Do not move the rate to bytes 5-6 or emit `rate_lo, rate_hi`; the firmware then receives `rate << 8`. Wheel up/down are wheel functions rather than HID buttons, so their turbo `target` keeps the raw wheel action id (`0x09`/`0x0A`); subtracting one (which is correct for body buttons, e.g. right click `0x02` -> `0x01`) writes the invalid target `0x08` for wheel-down and leaves that wheel direction inert. See `captures/ble/scroll-up-down-rebind.pcapng` for the non-turbo wheel bindings.
 
 Observed Basilisk V3 Pro Bluetooth button-read format:
 - read key family: `08 84 01 <slot>`
@@ -659,7 +679,7 @@ Contributor-validated Naga V2 Pro Bluetooth (vendor `0x068E`, PID `0x00A9`):
 - button reads (`08 84 <target> <slot>`) return the current and previous function blocks interleaved byte-by-byte when they differ, and the duplicated-byte form when they match; clients must decode both
 - wheel tilt on slots `0x34` / `0x35` uses the Basilisk-family IDs `0x68` / `0x69` (not the Naga Pro's `0x09` / `0x0A`)
 - lighting uses the per-zone keys `10 83` / `10 03` for color and `10 85` / `10 05` for brightness on LEDs `0x04` (palm logo) and `0x05` (12-button side panel)
-- battery raw `05 81 00 01` is a 0-255 byte (`0x45` = 27%); the standard HID battery characteristic reports a stale 100%, and `05 80 00 01` does not reliably indicate charging, so charging comes from a USB fallback session when one exists
+- battery raw `05 81 00 01` is a 0-255 byte (`0x45` = 27%); the standard HID battery characteristic reports a stale 100%, and `05 80 00 01` does not reliably indicate charging, so the app reads the separate charging key described in section 8.2
 - stored-bank writes accept the 10-byte `01 <slot> 00 <block>` payload form and restore byte-for-byte (validated on target 3, slot `0x40`)
 - see `captures/ble/2026-10-07-naga-v2-pro-buttons/`
 
@@ -988,7 +1008,13 @@ ACK header:
 Example: slot `0x02` -> right-click turbo with rate `0x003E`
 
 ```text
-01 02 00 0E 03 01 3E 00 00 00
+01 02 00 0E 03 01 00 3E 00 00
+```
+
+Example: slot `0x0A` (Scroll Down) -> Scroll Up turbo with rate `0x0094`
+
+```text
+01 0A 00 0E 03 09 00 94 00 00
 ```
 
 Example: slot `0x03` -> keyboard key `0x08` with turbo rate `0x008E`
@@ -1063,13 +1089,15 @@ Those stale-read masks are bounded and expire quickly; they are meant to hide tr
 ### 8.2 Battery Interpretation
 
 Current Swift interpretation:
+- All registered rechargeable Bluetooth mice read their device-wide battery level (`05 81 00 01`) independently of onboard profiles, at most once every 30 seconds. Intervening refreshes reuse the latest successful sample for that connection.
 - `batteryRaw`:
   - if `<= 100`, treat as direct percentage
   - else scale `0...255` to `0...100`
   - exception: on Basilisk V3 X HyperSpeed Bluetooth (`0x00BA`), always scale `0...255` to `0...100`, because that device reports values at or below 100 on the same `0...255` scale (observed raw `0x52` = 82 while the standard BLE Battery Service `0x2A19` and macOS reported 32%)
   - exception: on Basilisk V3 Pro 35K Phantom Green Edition Bluetooth (`0x00D8`), always scale `0...255` to `0...100`; the device reported raw `0x7B`, so values at or below 100 are on the same scale
 - Naga V2 Pro (`0x00A9`) and Naga V3 Pro (`0x00E9`) use the `0...255` scale even below 100, with USB-compatible truncation; the V3 Pro capture observed `0xC7`. Percentage calibration was not independently measured in that pass
-- on Basilisk V3 Pro Bluetooth (`0x00AC`), the Basilisk V3 Pro 35K Phantom Green Edition (`0x00D8`), Naga V2 Pro (`0x00A9`), and Naga V3 Pro (`0x00E9`), OpenSnek currently ignores `batteryStatus` for charging UI because the status bit does not reliably mean `charging`; charging only comes from an available USB fallback session
+- On Basilisk V3 Pro Bluetooth (`0x00AC`), the 9-byte HID report `05 05 0C 01 00 00 00 00 00` arrived on cable attachment and `05 05 0C 00 00 00 00 00 00` on removal. The vendor status register `05 80 00 01` returned `01` in both states. Synapse's startup capture also reads `05 85 00 01`. This register returned `00` with the cable unplugged and `01` with it plugged in while the mouse stayed on Bluetooth. OpenSnek samples it alongside the battery level on the first read and every 30 seconds, and uses the HID reports between samples.
+- The Basilisk V3 Pro 35K Phantom Green Edition, Basilisk V4 HyperSpeed, Naga Pro, Naga V2 Pro, and Naga V3 Pro use the same charging read and HID report mapping. Their physical charging transitions remain unverified. The app accepts a single `00` or `01` payload from `05 85 00 01`. Without a valid charging observation for the current connection or a USB fallback reading, charging stays unknown and a valid percentage remains visible.
 - on Basilisk V3 X HyperSpeed Bluetooth (`0x00BA`), OpenSnek ignores `batteryStatus` for charging UI and reports `not charging` because that device is AA-powered
 
 Those semantics are client policy inferred from observed behavior, not a fully decoded vendor spec.
@@ -1125,6 +1153,7 @@ The app may still expose richer lighting on USB HID, but this BLE document only 
 
 ## 11. Cross-References
 
+- [Basilisk V4 HyperSpeed Bluetooth bring-up](../research/BASILISK_V4_HYPERSPEED_BT.md): local `068E:00EC` read/write/restore research, including DPI, power, button inventory, and ACK-without-changed-readback lighting limitations; the scoped Bluetooth profile now exposes DPI, power, brightness, and all twelve button/wheel slots with app-path remap, native Default, and original-state restore checks.
 - [Protocol Index](./PROTOCOL.md)
 - [USB Protocol](./USB_PROTOCOL.md)
 - [USB/BLE Parity](./PARITY.md)

@@ -34,7 +34,7 @@ public enum ButtonSlotAccess: String, Codable, Hashable, Sendable {
         switch self {
         case .editable: return nil
         case .protocolReadOnly: return "OpenSnek can see this button, but it cannot change it yet."
-        case .softwareReadOnly: return "OpenSnek can detect this button, but this mouse does not expose remapping for it yet."
+        case .softwareReadOnly: return "OpenSnek can detect this button, but this device does not expose remapping for it yet."
         }
     }
 }
@@ -265,8 +265,8 @@ public struct DeviceProfile: Hashable, Sendable {
     /// True when the app must read the hardware-active DPI to find the active stage, even with onboard profile support on, because the mouse
     /// does not send passive DPI reports that follow its DPI button.
     public let pollsLiveDPIStageWithOnboardProfiles: Bool
-    /// True for profile-mode session behavior that other mice do not use yet: a battery and sleep-timeout read about once each minute,
-    /// no error for the rejected metadata read of the base profile, a read of every visible button slot, and a longer wait for profile-write ACKs.
+    /// True for profile-mode session behavior that other mice do not use yet: no error for
+    /// the rejected metadata read of the base profile, a read of every visible button slot, and a longer wait for profile-write ACKs.
     public let usesExtendedProfileSessionHandling: Bool
 
     public init(
@@ -353,6 +353,11 @@ public struct DeviceProfile: Hashable, Sendable {
 public extension MouseDevice {
     private var resolvedProfile: DeviceProfile? { DeviceProfiles.resolve(vendorID: vendor_id, productID: product_id, transport: transport) }
 
+    var hasRechargeableBattery: Bool { resolvedProfile?.id.hasRechargeableBattery == true }
+
+    /// Only these receiver profiles stream custom frames and can yield their LEDs to a charging dock.
+    var usesDockChargingLightingOverride: Bool { transport == .usb && supportsSoftwareLightingEffects && [0x00AB, 0x00A8].contains(product_id) }
+
     var supportsSoftwareLightingEffects: Bool {
         guard transport == .usb, let profile = resolvedProfile else { return false }
         return profile.softwareLightingFrameLayout != nil && !profile.supportedSoftwareLightingPresets.isEmpty
@@ -371,6 +376,8 @@ public extension MouseDevice {
         guard transport == .usb else { return false }
         return resolvedProfile?.supportsScrollModeControls ?? false
     }
+
+    var supportsLightingColorControls: Bool { !(resolvedProfile?.supportedLightingEffects.isEmpty ?? false) }
 
     var supportsLightingBrightnessControls: Bool {
         guard showsLightingControls else { return false }
@@ -449,7 +456,7 @@ public enum DeviceProfiles {
     ]
 
     public static let basiliskV3USBFamilyDocumentedReadOnlySlots: [DocumentedButtonSlot] = [
-        DocumentedButtonSlot(descriptor: ButtonSlotDescriptor(slot: 14, friendlyName: "Scroll Mode Toggle", defaultKind: .default), access: .protocolReadOnly, note: "OpenSnek can see this button, but the mouse does not let apps remap it yet."),
+        DocumentedButtonSlot(descriptor: ButtonSlotDescriptor(slot: 14, friendlyName: "Scroll Mode Toggle", defaultKind: .default), access: .protocolReadOnly, note: "OpenSnek can see this button, but the device does not let apps remap it yet."),
         DocumentedButtonSlot(descriptor: ButtonSlotDescriptor(slot: 106, friendlyName: "Profile Button", defaultKind: .default), access: .protocolReadOnly, note: "OpenSnek can see this button, but profile-button remap ACK/readback is not stable enough to expose yet.")
     ]
 
@@ -488,12 +495,42 @@ public enum DeviceProfiles {
         usbLightingZones: basiliskV3XUSBLightingZones, passiveDPIInput: PassiveDPIInputDescriptor(usagePage: 0x01, usage: 0x02, reportID: 0x05, subtype: 0x02, heartbeatSubtype: 0x10, minInputReportSize: 7, maxFeatureReportSize: 1, maximumDPI: 18_000), supportsLightingBrightnessControls: true,
         onboardProfileCount: 1)
 
+    // V4 extra-button positions were press-correlated on the receiver; native defaults are preserved.
+    public static let basiliskV4ButtonSlots: [ButtonSlotDescriptor] = [
+        ButtonSlotDescriptor(slot: 1, friendlyName: "Left Click", defaultKind: .leftClick), ButtonSlotDescriptor(slot: 2, friendlyName: "Right Click", defaultKind: .rightClick), ButtonSlotDescriptor(slot: 3, friendlyName: "Middle Click", defaultKind: .middleClick),
+        ButtonSlotDescriptor(slot: 4, friendlyName: "Back Button", defaultKind: .mouseBack), ButtonSlotDescriptor(slot: 5, friendlyName: "Forward Button", defaultKind: .mouseForward), ButtonSlotDescriptor(slot: 52, friendlyName: "Scroll Left", defaultKind: .default),
+        ButtonSlotDescriptor(slot: 53, friendlyName: "Scroll Right", defaultKind: .default), ButtonSlotDescriptor(slot: 9, friendlyName: "Scroll Up", defaultKind: .scrollUp), ButtonSlotDescriptor(slot: 10, friendlyName: "Scroll Down", defaultKind: .scrollDown),
+        ButtonSlotDescriptor(slot: 57, friendlyName: "Thumb Paddle", defaultKind: .default), ButtonSlotDescriptor(slot: 128, friendlyName: "Front Side Button", defaultKind: .default), ButtonSlotDescriptor(slot: 14, friendlyName: "Underside Button", defaultKind: .default)
+    ]
+
+    // Scoped local read/write/restore evidence: captures/ble/2026-11-08-basilisk-v4-hyperspeed/.
+    // Effect ACKs did not change authoritative state, so lighting is brightness-only.
+    public static let basiliskV4HyperspeedBluetooth = DeviceProfile(
+        id: .basiliskV4Hyperspeed, productName: "Basilisk V4 HyperSpeed", transport: .bluetooth, supportedProducts: [0x00EC], buttonLayout: ButtonSlotLayout(visibleSlots: basiliskV4ButtonSlots, writableSlots: basiliskV4ButtonSlots.map(\.slot)), supportsAdvancedLightingEffects: false,
+        supportedLightingEffects: [], usbLightingLEDIDs: [0x0A], usbLightingZones: [USBLightingZoneDescriptor(id: "underglow", label: "Underglow", ledIDs: [0x0A])], supportsIndependentXYDPI: true, supportsLightingBrightnessControls: true, supportsLightingStateReads: false,
+        supportsPollRateControls: false)
+
+    // Receiver only: the cable PID 00EB remains unvalidated.
+    public static let basiliskV4HyperspeedUSB = DeviceProfile(
+        id: .basiliskV4Hyperspeed, productName: "Basilisk V4 HyperSpeed", transport: .usb, supportedProducts: [0x00EA], usbTransactionID: 0x1F, buttonLayout: ButtonSlotLayout(visibleSlots: basiliskV4ButtonSlots, writableSlots: basiliskV4ButtonSlots.map(\.slot)),
+        supportsAdvancedLightingEffects: true, supportedLightingEffects: [.off, .staticColor, .spectrum, .pulseRandom, .pulseSingle, .pulseDual], usbLightingLEDIDs: [0x00], usbLightingZones: [USBLightingZoneDescriptor(id: "underglow", label: "Underglow", ledIDs: [0x00])],
+        supportsIndependentXYDPI: true, supportsLightingBrightnessControls: true, usbBrightnessLEDIDs: [0x00], usbBrightnessReadLEDIDs: [0x0A])
+
     public static let basiliskV3ProBluetooth = basiliskV3ProBluetoothFamilyProfile(id: .basiliskV3Pro, productName: "Basilisk V3 Pro", supportedProducts: [0x00AC], maximumDPI: 30_000)
 
     // The translucent Phantom Green Edition has no logo LED (OpenRazer exposes no logo methods and a 1x12
     // matrix for its USB IDs 0x00D6/0x00D7), so only the scroll wheel and underglow zones are exposed even
     // though the firmware still lists LED 0x04.
     public static let basiliskV3Pro35KPhantomGreenLightingZones: [USBLightingZoneDescriptor] = [USBLightingZoneDescriptor(id: "scroll_wheel", label: "Scroll Wheel", ledIDs: [0x01]), USBLightingZoneDescriptor(id: "underglow", label: "Underglow", ledIDs: [0x0A])]
+
+    // USB identities and controls are mapped from OpenRazer and the shared Basilisk backend, not
+    // hardware validated. Keep custom frames off: the Phantom's 1x12 matrix is not our 14-cell layout.
+    // USB profile metadata/CRUD also needs its own evidence; the Bluetooth rejection is not USB proof.
+    public static let basiliskV3Pro35KPhantomGreenUSB = DeviceProfile(
+        id: .basiliskV3Pro35K, productName: "Basilisk V3 Pro 35K Phantom Green Edition", transport: .usb, supportedProducts: [0x00D6, 0x00D7], usbTransactionID: basiliskV3USBFamilyTransactionID,
+        buttonLayout: ButtonSlotLayout(visibleSlots: basiliskV3FamilyButtonSlots, writableSlots: basiliskV3FamilyButtonSlots.map(\.slot), documentedSlots: basiliskV3USBFamilyDocumentedReadOnlySlots), supportsAdvancedLightingEffects: true, supportedLightingEffects: basiliskV335KUSBLightingEffects,
+        usbLightingLEDIDs: [0x01, 0x0A], usbLightingZones: basiliskV3Pro35KPhantomGreenLightingZones, passiveDPIInput: PassiveDPIInputDescriptor(usagePage: 0x01, usage: 0x06, reportID: 0x05, subtype: 0x02, minInputReportSize: 5, maximumDPI: 35_000), supportsIndependentXYDPI: true,
+        supportsScrollModeControls: true, supportsLightingBrightnessControls: true, isLocallyValidated: false)
 
     // Advertises as "BSKV3P 35K"; contributor validated against the Basilisk V3 Pro Bluetooth vendor surface.
     // Onboard profile CRUD stays off: the tested unit rejects every `03 84` metadata read with status 0x03,
@@ -840,8 +877,8 @@ public enum DeviceProfiles {
         usbBrightnessLEDIDs: [0x00], usbBrightnessReadLEDIDs: mouseDockProUSBBrightnessReadLEDIDs, isLocallyValidated: false)
 
     public static let all: [DeviceProfile] = [
-        basiliskV3XUSB, basiliskV3USB, basiliskV3ProUSB, basiliskV335KUSB, basiliskV3XBluetooth, basiliskV3ProBluetooth, basiliskV3Pro35KBluetooth, basiliskV3Pro35KPhantomGreenBluetooth, orochiV2Bluetooth, nagaProUSB, nagaProBluetooth, nagaV2ProUSB, nagaV2ProBluetooth, nagaV3ProUSB,
-        nagaV3ProBluetooth, basiliskUSB, lanceheadTEUSB, huntsmanMiniUSB, tartarusProUSB, mouseDockUSB, mouseDockProUSB
+        basiliskV3XUSB, basiliskV3USB, basiliskV3ProUSB, basiliskV335KUSB, basiliskV3Pro35KPhantomGreenUSB, basiliskV3XBluetooth, basiliskV3ProBluetooth, basiliskV3Pro35KBluetooth, basiliskV3Pro35KPhantomGreenBluetooth, orochiV2Bluetooth, nagaProUSB, nagaProBluetooth, nagaV2ProUSB,
+        nagaV2ProBluetooth, nagaV3ProUSB, nagaV3ProBluetooth, basiliskV4HyperspeedBluetooth, basiliskV4HyperspeedUSB, basiliskUSB, lanceheadTEUSB, huntsmanMiniUSB, tartarusProUSB, mouseDockUSB, mouseDockProUSB
     ]
 
     public static func resolve(vendorID: Int, productID: Int, transport: DeviceTransportKind) -> DeviceProfile? { all.first(where: { $0.matches(vendorID: vendorID, productID: productID, transport: transport) }) }
@@ -860,6 +897,7 @@ public enum DeviceProfiles {
 
     public static func maximumDPI(for profileID: DeviceProfileID?) -> Int {
         switch profileID {
+        case .basiliskV4Hyperspeed: return 33_000
         case .basiliskV3XHyperspeed: return 18_000
         case .basiliskV3: return 26_000
         case .basiliskV3Pro: return 30_000
@@ -981,7 +1019,7 @@ public enum DeviceProfiles {
 
     public static func supportsIndependentXYDPI(for profileID: DeviceProfileID?) -> Bool {
         switch profileID {
-        case .basiliskV3, .basiliskV3Pro, .basiliskV335K, .basiliskV3Pro35K, .basiliskV3Pro35KStandard, .nagaV3Pro, .basilisk, .lanceheadTournamentEdition: return true
+        case .basiliskV4Hyperspeed, .basiliskV3, .basiliskV3Pro, .basiliskV335K, .basiliskV3Pro35K, .basiliskV3Pro35KStandard, .nagaV3Pro, .basilisk, .lanceheadTournamentEdition: return true
         case .basiliskV3XHyperspeed, .orochiV2, .nagaPro, .nagaV2Pro, .huntsmanMini, .tartarusPro, .mouseDock, .mouseDockPro, nil: return false
         }
     }

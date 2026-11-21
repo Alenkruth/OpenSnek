@@ -10,44 +10,45 @@ struct BatteryIconPresentation: Equatable {
         case low
     }
 
-    let symbolName: String
-    let variableValue: Double
+    let percent: Int
+    let isCharging: Bool
     let accent: Accent
+
+    var tier: Int { ((percent + 12) / 25) * 25 }
+    var animatesCharging: Bool { isCharging && percent < 100 }
+    var symbolName: String { isCharging && percent == 100 ? "battery.100percent.bolt" : "battery.\(tier)percent" }
+}
+
+/// Renders only the charging symbol on a periodic timeline. The percentage label always shows telemetry.
+struct BatteryIconView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let icon: BatteryIconPresentation
+
+    var body: some View { if icon.animatesCharging && !reduceMotion { ChargingBatteryIcon().accessibilityLabel("Charging") } else { Image(systemName: icon.symbolName).accessibilityLabel(icon.isCharging ? "Charging" : "Battery") } }
+}
+
+/// Starts a new empty-to-full cycle each time charging becomes visible.
+private struct ChargingBatteryIcon: View {
+    @State private var start = Date()
+
+    var body: some View { TimelineView(.periodic(from: start, by: BatteryPresentation.frameInterval)) { context in Image(systemName: BatteryPresentation.chargingSymbol(elapsed: context.date.timeIntervalSince(start))) } }
 }
 
 /// Defines battery presentation values.
 enum BatteryPresentation {
     static let lowBatteryNSColor = NSColor(calibratedRed: 1.0, green: 0.36, blue: 0.39, alpha: 1.0)
     static let lowBatteryColor = Color(nsColor: lowBatteryNSColor)
+    static let frameInterval: TimeInterval = 0.5
+
+    static func chargingSymbol(elapsed: TimeInterval) -> String {
+        let frame = Int(max(0, elapsed) / frameInterval) % 5
+        return "battery.\(frame * 25)percent"
+    }
 
     static func icon(percent: Int, charging: Bool?, thresholdRaw: Int? = nil) -> BatteryIconPresentation {
-        let clampedPercent = max(0, min(100, percent))
-        let isLow = isLowBattery(percent: clampedPercent, charging: charging, thresholdRaw: thresholdRaw)
-        return BatteryIconPresentation(symbolName: symbolName(percent: clampedPercent, charging: charging), variableValue: tieredBatteryValue(percent: clampedPercent, charging: charging), accent: isLow ? .low : .normal)
-    }
-
-    static func symbolName(percent: Int, charging: Bool?) -> String {
-        if charging == true { return "battery.100percent.bolt" }
-
-        switch percent {
-        case ..<13: return "battery.0percent"
-        case ..<38: return "battery.25percent"
-        case ..<63: return "battery.50percent"
-        case ..<88: return "battery.75percent"
-        default: return "battery.100percent"
-        }
-    }
-
-    static func tieredBatteryValue(percent: Int, charging: Bool?) -> Double {
-        if charging == true { return Double(max(0, min(100, percent))) / 100.0 }
-
-        switch percent {
-        case ..<13: return 0.0
-        case ..<38: return 0.25
-        case ..<63: return 0.50
-        case ..<88: return 0.75
-        default: return 1.0
-        }
+        let clamped = max(0, min(100, percent))
+        let isLow = isLowBattery(percent: clamped, charging: charging, thresholdRaw: thresholdRaw)
+        return BatteryIconPresentation(percent: clamped, isCharging: charging == true, accent: isLow ? .low : .normal)
     }
 
     static func isLowBattery(percent: Int, charging: Bool?, thresholdRaw: Int?) -> Bool {
@@ -101,6 +102,7 @@ enum ServiceMenuBarPresentation {
 
 /// Renders the service menu bar view UI.
 struct ServiceMenuBarView: View {
+    @Environment(\.isDocumentationPreview) private var isDocumentationPreview
     private static let menuActionRowHeight: CGFloat = 34
 
     let deviceStore: DeviceStore
@@ -119,7 +121,7 @@ struct ServiceMenuBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            statusRow
+            statusRow.zIndex(1)
             if showsDeviceControls {
                 VStack(alignment: .leading, spacing: 10) {
                     if !controlsEnabled, let message = deviceStore.selectedDeviceInteractionMessage { menuMessage(message, weight: .bold) }
@@ -139,7 +141,7 @@ struct ServiceMenuBarView: View {
                     if let message = runtimeStore.compactStatusMessage { menuMessage(message, weight: .bold) }
                 }
             } else {
-                menuMessage("Connect a supported mouse to edit DPI from the menu bar.")
+                menuMessage("Connect a device with adjustable DPI to use these controls.")
             }
             Divider()
             actionRow("Show OpenSnek", systemImage: "rectangle.on.rectangle") { runtimeStore.openFullAppFromService() }
@@ -147,12 +149,14 @@ struct ServiceMenuBarView: View {
             toggleRow("Start at login", systemImage: "checkmark.circle", isOn: Binding(get: { runtimeStore.launchAtStartupEnabled }, set: { runtimeStore.setLaunchAtStartupEnabled($0) }))
             actionRow("Quit", systemImage: "power") { runtimeStore.terminateServiceProcess() }
         }.padding(16).frame(width: 320).task {
+            guard !isDocumentationPreview else { return }
             await runtimeStore.start()
             await refreshCompactMenuDiagnostics()
         }.task(id: deviceStore.selectedDeviceID) { await refreshCompactMenuDiagnostics() }.onAppear {
+            guard !isDocumentationPreview else { return }
             runtimeStore.setCompactMenuPresented(true)
             Task { await refreshCompactMenuDiagnostics() }
-        }.onDisappear { runtimeStore.setCompactMenuPresented(false) }
+        }.onDisappear { if !isDocumentationPreview { runtimeStore.setCompactMenuPresented(false) } }
     }
 
     private var header: some View {
@@ -183,7 +187,7 @@ struct ServiceMenuBarView: View {
             } else {
                 Text(deviceStore.selectedDevice?.product_name ?? "No device connected").font(.system(size: 15, weight: .black, design: .rounded))
             }
-            Text(deviceStore.selectedDevice?.connectionLabel ?? "Waiting for a supported mouse").font(.system(size: 11, weight: .bold, design: .rounded)).foregroundStyle(.secondary)
+            Text(deviceStore.selectedDevice?.connectionLabel ?? "Waiting for a supported device").font(.system(size: 11, weight: .bold, design: .rounded)).foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -194,11 +198,12 @@ struct ServiceMenuBarView: View {
             Spacer()
 
             if let battery = deviceStore.state?.battery_percent {
-                let batteryIcon = ServiceMenuBarPresentation.batteryIcon(percent: battery, charging: deviceStore.state?.charging, thresholdRaw: deviceStore.state?.low_battery_threshold_raw)
+                let batteryIcon = ServiceMenuBarPresentation.batteryIcon(percent: battery, charging: controlsEnabled ? deviceStore.state?.charging : nil, thresholdRaw: deviceStore.state?.low_battery_threshold_raw)
                 HStack(spacing: 4) {
-                    Image(systemName: batteryIcon.symbolName, variableValue: batteryIcon.variableValue)
+                    BatteryIconView(icon: batteryIcon)
                     Text("\(battery)%")
-                }.font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundStyle(batteryIcon.accent == .low ? BatteryPresentation.lowBatteryColor : .secondary)
+                }.font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundStyle(batteryIcon.accent == .low ? BatteryPresentation.lowBatteryColor : .secondary).batteryHoverTooltip(
+                    deviceStore.batteryHelp(for: deviceStore.selectedDevice, percent: battery, charging: deviceStore.state?.charging), yOffset: 20)
             }
         }
     }
@@ -313,6 +318,7 @@ struct ServiceMenuBarView: View {
     }
 
     private func refreshCompactMenuDiagnostics() async {
+        guard !isDocumentationPreview else { return }
         // Reopening the compact menu should not tear down the shared HID discovery
         // manager; that can interrupt a passive stream when polling is disabled.
         await runtimeStore.refreshHIDAccessStatus(forceRefresh: false)
@@ -323,11 +329,18 @@ struct ServiceMenuBarView: View {
 
 /// Renders the compact stage picker button UI.
 private struct CompactStagePickerButton: View {
+    @Environment(\.isDocumentationPreview) private var isDocumentationPreview
     let title: String
     let isSelected: Bool
     let action: () -> Void
 
-    var body: some View { Button(action: action) { stageLabel }.buttonStyle(.plain) }
+    var body: some View {
+        Button(action: action) {
+            // cacheDisplay leaves vertical fragments beside the capsule's curved
+            // border. Flatten this SwiftUI-only label before offscreen capture.
+            if isDocumentationPreview { stageLabel.drawingGroup() } else { stageLabel }
+        }.buttonStyle(.plain)
+    }
 
     private var stageLabel: some View {
         Text(title).font(.system(size: 11, weight: .black, design: .rounded)).lineLimit(1).minimumScaleFactor(0.7).foregroundStyle(isSelected ? Color.accentColor : .primary).frame(maxWidth: .infinity, minHeight: 34).background(stageBackground).overlay(stageBorder).contentShape(Capsule())
@@ -363,7 +376,7 @@ struct ServiceMenuBarStatusItemLabel: View {
                 // FB10185325, orchetect/MenuBarExtraAccess#1). Suppress it.
                 SpuriousStatusItemSuppressor()
             }
-        }.help(helpText).accessibilityLabel(helpText)
+        }.help(helpText).accessibilityLabel(helpText).accessibilityValue(deviceStore.state?.battery_percent.map { "Battery \($0)%" } ?? "")
     }
 
     private var serviceLabel: some View {
@@ -377,9 +390,10 @@ struct ServiceMenuBarStatusItemLabel: View {
     }
 
     private var helpText: String {
-        if let device = deviceStore.selectedDevice, let currentDpi { return "\(device.product_name), \(currentDpi) DPI" }
-        if let device = deviceStore.selectedDevice { return device.product_name }
-        return "OpenSnek"
+        guard let device = deviceStore.selectedDevice else { return "OpenSnek" }
+        let title = currentDpi.map { "\(device.product_name), \($0) DPI" } ?? device.product_name
+        guard let percent = deviceStore.state?.battery_percent, let batteryHelp = deviceStore.batteryHelp(for: device, percent: percent, charging: deviceStore.state?.charging) else { return title }
+        return title + "\n" + batteryHelp
     }
 }
 

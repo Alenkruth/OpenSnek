@@ -278,6 +278,7 @@ Client note:
 - Preserve the observed 35K native clutch restore block `06 01 05 01 90 01 90` when restoring slot `0x0F`; the 35K default differs from the V3 Pro default even though both devices accept the same `DPI Clutch` action payload.
 - On the observed V3 Pro profile-button slot (`0x6A`), remap writes can land, but repeated `0x02:0x0C` / `0x02:0x8C` cycles eventually returned timeout/no-response frames during probing. Keep this slot out of shipped UI until that write/readback path is stable.
 - Keyboard category function data is `modifier byte, HID key`. The modifier byte follows the Razer/Basilisk convention documented from Synapse captures: `0x01` left Ctrl, `0x02` left Shift, `0x04` left Alt/Option, `0x08` left GUI/Command, `0x10` right Ctrl, `0x20` right Shift, `0x40` right Alt/Option, `0x80` right GUI/Command.
+- A modifier key bound on its own (HID usage `0xE0`-`0xE7`, for example Left Option `0xE2`) is written as its modifier bit with an empty key: `02 02 04 00 00 00 00`, not `02 02 00 e2 00 00 00`. On the Naga V3 Pro over Bluetooth, the bare-usage form makes the mouse report `0xE2` only in the input report's key array with an empty modifier byte, which macOS does not apply as a held modifier; the modifier-bit form reports the modifier byte (`06 04 00 e2 ...`) and works as a held Option. Readback decodes an empty key with modifier bits back to the lowest modifier as the key, so the binding round-trips.
 - Treat button access as three separate categories during new-device bring-up:
   - `editable`: validated over `0x02:0x0C`
   - `protocol-read-only`: readable from `0x02:0x8C`, but no validated writable path
@@ -882,6 +883,13 @@ reliable on the local USB stack.
 
 ## Device-Specific Notes
 
+### Basilisk V4 HyperSpeed receiver
+
+`1532:00EA` uses `00:8E/0E` polling, LED `0A` brightness reads and LED `00` lighting
+writes. DPI reads zero-fill hidden rows, requiring a retained full baseline.
+See the [scoped mapping and limits](../research/BASILISK_V4_HYPERSPEED_USB.md).
+
+
 ### Razer Basilisk V3 X HyperSpeed (0x00B9)
 
 | Setting | Value |
@@ -909,6 +917,25 @@ reliable on the local USB stack.
 | Poll Rates | 125, 500, 1000 Hz |
 | Validated matrix LEDs | `0x01` scroll wheel, `0x04` logo, `0x0A` underglow |
 | Extra validated button slots | `0x0E` scroll mode (protocol-read-only), `0x0F` sensitivity clutch / DPI clutch (editable; default `06 01 05 01 90 01 90`), `0x34` wheel tilt left, `0x35` wheel tilt right, `0x60` DPI button, `0x6A` profile button (protocol-read-only; report-4 `0x50`) |
+
+### Razer Basilisk V3 Pro 35K Phantom Green Edition (0x00D6 / 0x00D7)
+
+**Mapped only; awaiting hardware validation on both cable and receiver.** IDs and
+control families are based on [OpenRazer](https://github.com/openrazer/openrazer/blob/master/daemon/openrazer_daemon/hardware/mouse.py).
+OpenSnek reuses the Basilisk USB transaction ID `0x1F`, DPI stage/scalar commands
+with a 35,000 ceiling and independent X/Y, poll rate, power controls, button map,
+scroll mode/acceleration/smart-reel, and built-in off/static/spectrum/wave effects.
+Brightness and effects target only scroll wheel `0x01` and underglow `0x0A`.
+The factory button blocks captured over Bluetooth are reused as a mapping, not
+USB validation. The regular Pro 35K IDs `0x00CC`/`0x00CD` remain unclaimed.
+
+Custom frames stay disabled: OpenRazer lists a 1x12 matrix with no logo LED, and
+we have no Phantom cell-order capture. The normal Basilisk 14-cell layout must
+not be used. Onboard profile CRUD stays disabled until USB metadata and guarded
+write/readback/restore are verified; Bluetooth's metadata rejection alone says
+nothing about USB. No USB persistence, physical response, disconnect/reconnect,
+or sleep/wake behavior has been validated. Follow the hardware journal and
+restore workflow before promoting either transport identity from mapped status.
 
 ### Razer Basilisk V3 Pro (0x00AA / 0x00AB)
 
@@ -1055,6 +1082,18 @@ Shipped per-profile IDs (`DeviceProfile.usbTransactionID`): Mouse Dock Pro (`0x0
 ---
 
 ### Battery telemetry during software lighting
+
+The Basilisk V3 Pro receiver (`1532:00AB`) also emits a 16-byte input report
+on usage page `0x01`, usage `0x06`. The observed prefix was `05 0C 01` on
+docking and `05 0C 00` on lifting the mouse. Both reports had 13 trailing
+zero bytes. The charging register (`07:84`) agreed even at 100% battery.
+All registered rechargeable mice can update the charging flag in the main window and menu bar when they emit this report on the matching interface. Other models await physical verification of the report. Devices without this report use the normal `07:84` read.
+The report carries no battery percentage, so the UI keeps the last measured level.
+OpenSnek leaves the LEDs to the firmware while charging and sends the current
+software frame on lift, including when its colors match the last frame sent.
+This was verified on the receiver with Battery Meter at 100%. If the Mac
+misses the lift report during sleep, a fresh charging-register read after
+wake can clear a previously observed dock state and restore the frame.
 
 Software effects retain cached settings to avoid a full settings sweep competing with frame writes. Battery telemetry is read independently with serialized `07:80` and `07:84` commands every 30 seconds while a battery-capable USB device runs an effect. A USB availability transition or physical reconnect makes the next scheduled sample due immediately. Battery reads preserve the latest DPI and lighting state and publish the resulting battery state to service clients. Failed commands are not retried; a later scheduled sample or reconnect provides the next opportunity. Maintainer hardware validation of natural mouse sleep/wake with effects running remains pending.
 

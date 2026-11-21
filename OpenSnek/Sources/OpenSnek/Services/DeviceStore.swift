@@ -159,6 +159,14 @@ import SwiftUI
         return DeviceStatusIndicator(label: base.label, color: Color(hex: 0xF4C65D))
     }
 
+    func batteryHelp(for device: MouseDevice?, percent: Int, charging: Bool?) -> String? {
+        guard let device, device.hasRechargeableBattery, connectionState(for: device) == .connected else { return nil }
+        if charging == true { return "Charging" }
+        guard let seconds = BatteryRuntimeEstimator.remaining(for: device, percent: percent) else { return "Learning battery life…" }
+        let duration = Duration.seconds(seconds).formatted(.units(allowed: [.days, .hours, .minutes], width: .narrow))
+        return "\(duration) remaining"
+    }
+
     var currentDeviceStatusTooltip: String? {
         _ = connectionDiagnosticsRevision
         guard let selectedDevice else { return nil }

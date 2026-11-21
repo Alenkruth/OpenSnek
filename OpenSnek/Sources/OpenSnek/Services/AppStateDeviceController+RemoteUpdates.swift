@@ -15,7 +15,7 @@ import OpenSnekHardware
         await refreshDpiUpdateTransportStatuses(for: listed)
     }
 
-    func applyRemoteServiceSnapshot(_ snapshot: SharedServiceSnapshot) {
+    func applyRemoteServiceSnapshot(_ snapshot: SharedServiceSnapshot, isLaunchPresentation: Bool = false) {
         guard !isTearingDown else { return }
         guard environment.usesRemoteServiceTransport else { return }
 
@@ -28,7 +28,7 @@ import OpenSnekHardware
         let sortedSnapshotDevices = snapshot.devices.sorted { $0.product_name < $1.product_name }
         let selectedDeviceMissing = deviceStore.selectedDeviceID.map { !liveIDs.contains($0) } ?? !sortedSnapshotDevices.isEmpty
         let shouldApplyDeviceList = deviceStore.devices != sortedSnapshotDevices || selectedDeviceMissing
-        let deviceListChanged = shouldApplyDeviceList ? applyDeviceList(snapshot.devices, source: "subscription") : false
+        let deviceListChanged = shouldApplyDeviceList ? applyDeviceList(snapshot.devices, source: isLaunchPresentation ? "menuLaunch" : "subscription") : false
         didApplySnapshotChange = didApplySnapshotChange || deviceListChanged
 
         if let runtimeController = optionalRuntimeController, let serviceSelectedDeviceID = runtimeController.preferredClientSelectedDeviceID(snapshot: snapshot, availableDeviceIDs: liveIDs), serviceSelectedDeviceID != deviceStore.selectedDeviceID {
@@ -37,7 +37,7 @@ import OpenSnekHardware
         }
 
         for (deviceID, remoteState) in snapshot.stateByDeviceID where remoteState.device.transport == .usb && snapshot.usbControlAvailabilityByDeviceID[deviceID]?.blocksUSBControlInteraction != true { clearUSBPhysicalConnectSettling(for: deviceID) }
-        scheduleRemoteSnapshotSoftwareLightingAutoStart(for: snapshot.devices)
+        if !isLaunchPresentation { scheduleRemoteSnapshotSoftwareLightingAutoStart(for: snapshot.devices) }
 
         if applySelectedRemoteSnapshotPresentation(deviceListChanged: deviceListChanged) { didApplySnapshotChange = true }
 
@@ -240,6 +240,14 @@ import OpenSnekHardware
         if !deviceIDs.isDisjoint(with: unavailableDeviceIDs) { return true }
         if !deviceIDs.isDisjoint(with: usbTelemetryUnavailableBackoffDeviceIDs) { return true }
         return deviceIDs.contains { stateRefreshSuppressedUntilByDeviceID[$0] != nil && (refreshFailureCountByDeviceID[$0] ?? 0) > 0 }
+    }
+
+    func applyChargingUpdate(deviceID: String, charging: Bool, updatedAt: Date) {
+        guard let device = deviceStore.devices.first(where: { $0.id == deviceID }), device.hasRechargeableBattery, var state = stateCacheByDeviceID[deviceID] else { return }
+        if let latest = lastUpdatedByDeviceID[deviceID], latest > updatedAt { return }
+        state.charging = charging
+        cacheState(state, sourceDeviceID: deviceID, presentationDeviceID: deviceID, updatedAt: updatedAt)
+        if deviceStore.selectedDeviceID == deviceID { deviceStore.state?.charging = charging }
     }
 
     func applyBackendDeviceStateUpdate(deviceID: String, state updatedState: MouseState, updatedAt: Date) {

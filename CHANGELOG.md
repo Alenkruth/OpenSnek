@@ -5,10 +5,64 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+
 - Added contributor-validated Razer Basilisk V3 Pro 35K support over Bluetooth (`0x00CE`). The app supports DPI stages up to 35,000, the DPI button, battery and sleep timeout. The mouse has three lighting zones (scroll wheel, logo, underglow). Button remap and onboard profile management are available. Each button shows its mapped function. Media functions (play/pause, next and previous track, volume up and down, mute) are in the keyboard category. The Scroll Mode Toggle and the Profile Button are read-only. The selected profile stores static colors and brightness. Spectrum and Pulse apply to the live lighting only, because the mouse cannot store effects. Spectrum uses the body that the mouse reports after a reset in Razer Synapse. Profile rename failed in testing.
 
 ### Changed
+
+- Hovering over a battery percentage in the device window or menu bar panel now shows just the time remaining as soon as the pointer enters, once an estimate is available.
 - Changed the Bluetooth name fallback for `Razer Basilisk V3 Pro 35K` to resolve to the standard 35K profile and not to the Phantom Green Edition profile.
+
+## [1.5.1-rc.1]
+
+### Added
+
+- Charging battery icons cycle from empty to full below 100% and show a steady lightning bolt at 100% while on power. Hover over the battery to see estimated time remaining once OpenSnek has learned the discharge rate for that rechargeable device and connection.
+
+### Changed
+
+- Connection messages and profile controls now use “device” for all supported hardware, including keyboards, keypads, and accessories.
+
+## [1.5.0]
+
+### Added
+
+- Basilisk V4 HyperSpeed support over Bluetooth and the USB receiver includes independent X/Y DPI up to 33,000, battery level, sleep timeout, brightness, and remapping for all 12 button and wheel actions. The receiver also supports polling-rate changes and six built-in lighting effects.
+- Naga V3 Pro support covers wired USB, the receiver, and Bluetooth. Contributors verified 50,000 DPI, remapping across all three side plates, and three-zone lighting.
+- Basilisk V3 Pro 35K Phantom Green Edition support includes contributor-verified Bluetooth controls and mapped USB cable and receiver support. Mouse Dock Pro gains contributor-verified USB brightness, color, and lighting effects.
+- Update settings now let you opt into release candidates.
+
+### Fixed
+
+- Restored Bluetooth battery percentages during onboard profile reads on the Basilisk V3 Pro and Naga Pro. All six rechargeable models, including the Basilisk V4 HyperSpeed, now check charging at startup and update the window and menu bar when a recognized charging report arrives. Cable transitions over Bluetooth and dock transitions on the receiver were verified on the original Basilisk V3 Pro. The other five models await physical charging checks.
+- Advanced lighting resumes when the Basilisk V3 Pro leaves its wireless charger. Battery readings also refresh while software effects run and after reconnecting.
+- Improved Basilisk V3 Pro Bluetooth pairing and reconnection, and fixed delayed Bluetooth replies being treated as empty.
+- Fixed standalone modifier-key bindings and Bluetooth Turbo wheel remaps. The Naga Pro’s underside profile button and DPI buttons can now be remapped and restored to their defaults.
+- Fixed applying static lighting to all USB zones and the zone picker shifting while brightness changes.
+- Reopening the window from the menu bar restores the selected device and settings. In-app updates relaunch OpenSnek when the background service is running.
+
+## [1.5.0-rc.3]
+
+### Fixed
+- Closing the main window keeps the editor ready while the menu bar service is running. Reopening it restores the live settings immediately. The first launch from the menu bar also uses the service’s selected device and settings. On mice with onboard profiles, the service prepares the active profile and button mappings while the window is closed.
+- Advanced lighting resumes when the Basilisk V3 Pro is lifted from a wireless charger while connected through its USB receiver, including when Battery Meter shows the same percentage as before charging.
+- OpenSnek waits for macOS to register the Basilisk V3 Pro as a Bluetooth mouse before opening its vendor controls during pairing or reconnection.
+- Binding a modifier key on its own (Ctrl, Shift, Option or Command, left or right) to a mouse button now writes it as a modifier, so holding the button acts as a held modifier on macOS. Previously the bare key usage was written, which the mouse reported only as an ordinary key that macOS ignored as a modifier. Validated on the Naga V3 Pro over Bluetooth with Left Option, Left Shift and Right Shift; other devices and USB use the same function block but are not hardware-checked for this change.
+
+## [1.5.0-rc.2]
+
+### Changed
+- Renamed the Basilisk V4 HyperSpeed extra controls to Front Side Button, Thumb Paddle, and Underside Button after physical press checks on the receiver. Both USB and Bluetooth show these position-based names; native Default bindings are preserved.
+
+## [1.5.0-rc.1]
+
+### Added
+- Added scoped Basilisk V4 HyperSpeed support over Bluetooth (`0x00EC`) and the USB receiver (`0x00EA`): 33K X/Y DPI, battery, sleep, brightness and verified button remaps, including native Default restore for Profile, Hypershift and AI Prompt Master. All 12 button/wheel actions are editable on both transports, with changed-write and native-Default readback checks. USB adds 125/500/1000 Hz polling and six built-in lighting effects. Physical button positions, profile management, wheel settings and cable USB remain unvalidated; Bluetooth lighting is brightness-only. DPI edits preserve raw stage data and require a complete baseline from the current session.
+- Added mapped USB support for the Basilisk V3 Pro 35K Phantom Green Edition over cable (`0x00D6`) and receiver (`0x00D7`), awaiting hardware validation: DPI stages up to 35,000 with independent X/Y, poll rate, power controls, button remapping, scroll settings, and built-in lighting on the scroll wheel and underglow. Custom software lighting and onboard profile management stay hidden pending device-specific evidence. The USB probe now clamps scalar DPI writes to the selected device’s ceiling instead of 30,000.
+
+### Fixed
+
+- Bluetooth vendor exchanges now wait for the first response notification before starting idle completion, preventing a delayed reply from being treated as an empty successful exchange.
 
 ## [1.4.1-rc.2]
 
@@ -23,6 +77,7 @@ All notable changes to this project are documented in this file.
 - The repository's `run.sh` now shows and verifies a foreground main window instead of treating a running service or a successful launch request as proof the app opened.
 
 ### Fixed
+- Fixed Bluetooth button Turbo remaps writing a malformed turbo block, which made the wheel stop scrolling in one direction. The BLE encoder wrote the turbo rate low byte first and applied the 0-based mouse-button target to the wheel, so remapping Scroll Down with Turbo enabled sent action `0x0E` with target `0x08` (not a valid action) while Scroll Up still resolved `0x09` = scroll up. Bluetooth turbo blocks now use the captured big-endian rate layout (`0E 03 <target> <rate_hi> <rate_lo>`) and keep the raw wheel action ids (`0x09`/`0x0A`) for wheel up/down, matching the USB encoder and the wheel-tilt form. This affected every Bluetooth mouse with Turbo-capable buttons.
 - Fixed USB static lighting on multi-zone devices only reaching the last touched zone. The zone picker kept its own view state while the editor store rewrote an explicit “All Zones” choice to a single default zone, so the picker could read “All Zones” while switching Off to Static relit only the scroll wheel. The picker is now derived from the stored zone id and an explicit “All Zones” choice is preserved across effect changes and saved-lighting hydration, so switching Off to Static covers every zone while individual-zone edits stay scoped. Switching from Individual Zones to All Zones immediately uses and applies the first zone's color (for example, the scroll wheel), instead of inheriting the last-edited zone or requiring another color-picker edit. This affected every multi-zone USB device.
 - Fixed the Naga Pro button list labeling the underside profile button (slot `14`) as “Scroll Mode Toggle”. It is the profile button that cycles the saved onboard profiles, matching the Naga V2 Pro and Naga V3 Pro, and it is now remappable with Default restoring the profile cycle instead of being hidden as read-only. The Naga Pro's DPI buttons (slots `11`/`12`) are editable too, with their factory blocks captured from the device, so every mappable Naga Pro slot can now be remapped and restored.
 - Fixed lighting-only accessories and keyboards showing “USB telemetry is incomplete (missing poll rate)” even though their profiles intentionally omit mouse telemetry. The warning and the USB recovery check now share one profile-aware rule, so missing DPI stages, poll rate, or lighting is only reported for controls the device actually exposes. This affected the Mouse Dock, Huntsman Mini, and Tartarus Pro as well as the newly added Mouse Dock Pro.

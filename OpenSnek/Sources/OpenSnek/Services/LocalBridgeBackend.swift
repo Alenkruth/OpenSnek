@@ -11,9 +11,13 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
     private static let softwareLightingUSBHeartbeatInterval: TimeInterval = 2.0
 
     private let client = BridgeClient()
+    private var launchProfile = ServiceProfilePreparation()
+    private var profileMutationCount = 0
     private let softwareLightingEngine: SoftwareLightingEngine
     private let softwareLightingBatterySampler = SoftwareLightingBatterySampler()
     private var batteryConnectionGenerationByDeviceID: [String: UInt64] = [:]
+    private var batteryRuntimeEstimator = BatteryRuntimeEstimator()
+    private var lastChargingReportByDeviceID: [String: PassiveChargingEvent] = [:]
     private var cachedDevices: [MouseDevice] = []
     private var cachedDevicesAt: Date?
     private var cachedStateByDeviceID: [String: MouseState] = [:]
@@ -55,6 +59,8 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
             let stream = await self.client.passiveProfileSwitchEventStream()
             for await event in stream { await self.handlePassiveProfileSwitch(event) }
         }
+        let chargingEvents = client.passiveChargingEvents.makeStream()
+        Task { [weak self] in for await event in chargingEvents { await self?.handleChargingReport(event) } }
         Task { [weak self] in
             guard let self else { return }
             let stream = await self.client.devicePresenceEventStream()
@@ -99,8 +105,16 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
         if let cached = try await softwareLightingCachedReadState(device: device, cachedState: cachedStateBeforeRead, readStartedAt: readStartedAt) { return cached }
         let shouldUseFastPolling = device.transport == .bluetooth ? await client.shouldUseFastDPIPolling(device: device) : true
         if let cached = reusableCachedReadState(device: device, readStartedAt: readStartedAt, shouldUseFastPolling: shouldUseFastPolling) { return cached }
-        let state = try await freshReadState(device: device)
+        let generation = batteryConnectionGenerationByDeviceID[device.id, default: 0]
+        let read = try await freshReadState(device: device)
+        let state = Self.preservingNewerChargingReport(in: read, readStartedAt: readStartedAt, report: lastChargingReportByDeviceID[device.id])
+        if generation == batteryConnectionGenerationByDeviceID[device.id, default: 0] { observeBattery(device, state: state, readStartedAt: readStartedAt) }
         return finalizeReadState(device: device, state: state, cachedStateBeforeRead: cachedStateBeforeRead, readStartedAt: readStartedAt, shouldUseFastPolling: shouldUseFastPolling)
+    }
+
+    private func observeBattery(_ device: MouseDevice, state: MouseState, readStartedAt: Date) {
+        if let report = lastChargingReportByDeviceID[device.id], report.observedAt > readStartedAt { return }
+        batteryRuntimeEstimator.observe(device, percent: state.battery_percent, charging: state.charging, at: readStartedAt)
     }
 
     private func softwareLightingCachedReadState(device: MouseDevice, cachedState: MouseState?, readStartedAt: Date) async throws -> MouseState? {
@@ -122,7 +136,27 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
         let battery = try await softwareLightingBatterySampler.sample(device: device, connectionGeneration: generation, now: now) { [client] device in try await client.readUSBBattery(device: device) }
         guard let battery, batteryConnectionGenerationByDeviceID[device.id, default: 0] == generation, let latest = cachedStateByDeviceID[device.id] else { return }
         // Preserve changes received while awaiting the battery read, especially live DPI.
-        storeReadState(battery.applying(to: latest), deviceID: device.id)
+        let updated = Self.preservingNewerChargingReport(in: battery.applying(to: latest), readStartedAt: now, report: lastChargingReportByDeviceID[device.id])
+        observeBattery(device, state: updated, readStartedAt: now)
+        storeReadState(updated, deviceID: device.id)
+        if device.usesDockChargingLightingOverride, let charging = battery.charging { await softwareLightingEngine.updateWirelessCharging(device: device, charging: charging, observedAt: now, fromInputReport: false) }
+    }
+
+    private func handleChargingReport(_ event: PassiveChargingEvent) async {
+        guard let device = cachedDevices.first(where: { $0.id == event.deviceID }), device.hasRechargeableBattery else { return }
+        if let previous = lastChargingReportByDeviceID[device.id], previous.observedAt > event.observedAt { return }
+        if event.charging || lastChargingReportByDeviceID[device.id]?.charging == true { batteryRuntimeEstimator.interrupt(deviceID: device.id) }
+        lastChargingReportByDeviceID[device.id] = event
+        if var state = cachedStateByDeviceID[device.id], state.charging != event.charging {
+            state.charging = event.charging
+            let updatedAt = Date()
+            storeReadState(state, deviceID: device.id, updatedAt: updatedAt)
+            publishStateUpdate(.chargingChanged(deviceID: device.id, charging: event.charging, updatedAt: updatedAt))
+        }
+        switch device.transport {
+        case .bluetooth: await client.recordBluetoothCharging(event.charging, deviceID: device.id, observedAt: event.observedAt)
+        case .usb: await softwareLightingEngine.updateWirelessCharging(device: device, charging: event.charging, observedAt: event.observedAt, fromInputReport: true)
+        }
     }
 
     private func reusableCachedReadState(device: MouseDevice, readStartedAt: Date, shouldUseFastPolling: Bool) -> MouseState? {
@@ -190,9 +224,9 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
         return state
     }
 
-    private func storeReadState(_ state: MouseState, deviceID: String) {
+    private func storeReadState(_ state: MouseState, deviceID: String, updatedAt: Date = Date()) {
         cachedStateByDeviceID[deviceID] = state
-        cachedStateAtByDeviceID[deviceID] = Date()
+        cachedStateAtByDeviceID[deviceID] = updatedAt
         reconnectSeedStateByDeviceID[deviceID] = state
         updateSoftwareLightingBatteryPercent(deviceID: deviceID, from: state)
         publishSnapshotIfService()
@@ -272,14 +306,15 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
         defer { activeApplyCount -= 1 }
 
         let state: MouseState
-        do { state = try await client.apply(device: device, patch: patch, options: options) } catch {
+        do { state = try await withProfileMutation(device) { try await client.apply(device: device, patch: patch, options: options) } } catch {
             #if DEBUG
                 OpenSnekUITestSupport.recordApplyError(
                     UITestApplyEvent(device: device, patch: patch, state: nil, activeApplyCount: activeApplyCount, maxConcurrentApplyCount: maxConcurrentApplyCount, elapsed: Date().timeIntervalSince(startedAt), readbackPolicy: options.readbackPolicy.rawValue, error: error))
             #endif
             throw error
         }
-        let merged = Self.mergedApplyState(state, previous: cachedStateByDeviceID[device.id] ?? reconnectSeedStateByDeviceID[device.id])
+        let current = Self.preservingNewerChargingReport(in: state, readStartedAt: startedAt, report: lastChargingReportByDeviceID[device.id])
+        let merged = Self.mergedApplyState(current, previous: cachedStateByDeviceID[device.id] ?? reconnectSeedStateByDeviceID[device.id])
         let now = Date()
         cachedStateByDeviceID[device.id] = merged
         cachedStateAtByDeviceID[device.id] = now
@@ -317,19 +352,19 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
     func readOnboardProfileButtonBindings(device: MouseDevice, profileID: Int) async throws -> [Int: ButtonBindingDraft] { try await client.readOnboardProfileButtonBindings(device: device, profileID: profileID) }
 
     func createOnboardProfile(device: MouseDevice, mutation: OnboardProfileMutation, targetProfileID: Int?, replaceAssignedProfile: Bool) async throws -> OnboardProfileSnapshot {
-        try await client.createOnboardProfile(device: device, mutation: mutation, targetProfileID: targetProfileID, replaceAssignedProfile: replaceAssignedProfile)
+        return try await withProfileMutation(device) { try await client.createOnboardProfile(device: device, mutation: mutation, targetProfileID: targetProfileID, replaceAssignedProfile: replaceAssignedProfile) }
     }
 
-    func renameOnboardProfile(device: MouseDevice, profileID: Int, name: String) async throws -> OnboardProfileSnapshot { try await client.renameOnboardProfile(device: device, profileID: profileID, name: name) }
+    func renameOnboardProfile(device: MouseDevice, profileID: Int, name: String) async throws -> OnboardProfileSnapshot { return try await withProfileMutation(device) { try await client.renameOnboardProfile(device: device, profileID: profileID, name: name) } }
 
-    func updateOnboardProfile(device: MouseDevice, profileID: Int, mutation: OnboardProfileMutation) async throws -> OnboardProfileSnapshot { try await client.updateOnboardProfile(device: device, profileID: profileID, mutation: mutation) }
+    func updateOnboardProfile(device: MouseDevice, profileID: Int, mutation: OnboardProfileMutation) async throws -> OnboardProfileSnapshot { return try await withProfileMutation(device) { try await client.updateOnboardProfile(device: device, profileID: profileID, mutation: mutation) } }
 
     func projectOnboardProfileDPIToActiveLayer(device: MouseDevice, profileID: Int, dpi: OnboardDPIProfileSnapshot) async throws -> Bool { try await client.projectOnboardProfileDPIToActiveLayer(device: device, profileID: profileID, dpi: dpi) }
 
-    func deleteOnboardProfile(device: MouseDevice, profileID: Int) async throws -> OnboardProfileInventory { try await client.deleteOnboardProfile(device: device, profileID: profileID) }
+    func deleteOnboardProfile(device: MouseDevice, profileID: Int) async throws -> OnboardProfileInventory { return try await withProfileMutation(device) { try await client.deleteOnboardProfile(device: device, profileID: profileID) } }
 
     func activateOnboardProfile(device: MouseDevice, profileID: Int) async throws -> MouseState {
-        let state = try await client.activateOnboardProfile(device: device, profileID: profileID)
+        let state = try await withProfileMutation(device) { try await client.activateOnboardProfile(device: device, profileID: profileID) }
         let merged = cacheAndPublishState(state, for: device.id, updatedAt: Date())
         return merged
     }
@@ -420,6 +455,7 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
     func debugUSBReadButtonBinding(device: MouseDevice, slot: Int, profile: Int) async throws -> [UInt8]? { try await client.debugUSBReadButtonBinding(device: device, slot: slot, profile: profile) }
 
     private func handleDevicePresenceEvent(_ event: HIDDevicePresenceEvent) {
+        launchProfile.invalidate(deviceID: event.deviceID)
         if event.transport == .usb {
             if event.change == .connected {
                 pendingUSBDisconnectRefreshTasks.removeValue(forKey: event.deviceID)?.cancel()
@@ -586,6 +622,7 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
     }
 
     private func handlePassiveProfileSwitch(_ event: PassiveProfileSwitchEvent) async {
+        launchProfile.invalidate(deviceID: event.deviceID)
         guard let device = cachedDevices.first(where: { $0.id == event.deviceID }) else { return }
         do {
             AppLog.warning("DPITrace", "backend passiveProfileSwitch refresh start device=\(event.deviceID)")
@@ -687,7 +724,8 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
     }
 
     @discardableResult private func cacheAndPublishState(_ state: MouseState, for deviceID: String, updatedAt: Date) -> MouseState {
-        let merged = Self.mergedApplyState(state, previous: cachedStateByDeviceID[deviceID] ?? reconnectSeedStateByDeviceID[deviceID])
+        let current = Self.preservingNewerChargingReport(in: state, readStartedAt: updatedAt, report: lastChargingReportByDeviceID[deviceID])
+        let merged = Self.mergedApplyState(current, previous: cachedStateByDeviceID[deviceID] ?? reconnectSeedStateByDeviceID[deviceID])
         cachedStateByDeviceID[deviceID] = merged
         cachedStateAtByDeviceID[deviceID] = updatedAt
         reconnectSeedStateByDeviceID[deviceID] = merged
@@ -764,7 +802,9 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
             if publishSnapshot { publishSnapshotIfService() }
             return
         }
+        launchProfile.invalidate(deviceID: deviceID)
         usbControlAvailabilityByDeviceID[deviceID] = availability
+        if availability.blocksUSBControlInteraction { batteryRuntimeEstimator.interrupt(deviceID: deviceID) }
         batteryConnectionGenerationByDeviceID[deviceID, default: 0] &+= 1
         AppLog.debug("Backend", "usbControlAvailability device=\(deviceID) availability=\(availability.rawValue)")
         publishStateUpdate(.usbControlAvailability(deviceID: deviceID, availability: availability, updatedAt: updatedAt))
@@ -821,6 +861,8 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
     }
 
     private func invalidateCachedTelemetry(for deviceID: String) {
+        lastChargingReportByDeviceID.removeValue(forKey: deviceID)
+        batteryRuntimeEstimator.interrupt(deviceID: deviceID)
         batteryConnectionGenerationByDeviceID[deviceID, default: 0] &+= 1
         if let cached = cachedStateByDeviceID[deviceID] { reconnectSeedStateByDeviceID[deviceID] = cached }
         cachedDevicesAt = nil
@@ -848,6 +890,9 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
     private func purgeCaches(forRemovedDeviceIDs removedDeviceIDs: Set<String>) {
         guard !removedDeviceIDs.isEmpty else { return }
         for deviceID in removedDeviceIDs {
+            lastChargingReportByDeviceID.removeValue(forKey: deviceID)
+            batteryRuntimeEstimator.interrupt(deviceID: deviceID)
+            launchProfile.invalidate(deviceID: deviceID)
             batteryConnectionGenerationByDeviceID[deviceID, default: 0] &+= 1
             cachedStateByDeviceID.removeValue(forKey: deviceID)
             cachedStateAtByDeviceID.removeValue(forKey: deviceID)
@@ -866,6 +911,35 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
         Task { [softwareLightingEngine] in for input in recoveryInputs { _ = try? await softwareLightingEngine.resumeIfNeeded(device: input.device, batteryPercent: input.batteryPercent) } }
     }
 
+    private func withProfileMutation<T: Sendable>(_ device: MouseDevice, operation: () async throws -> T) async rethrows -> T {
+        launchProfile.invalidate(deviceID: device.id)
+        profileMutationCount += 1
+        defer { profileMutationCount -= 1 }
+        return try await operation()
+    }
+
+    func clearLaunchProfile() { launchProfile = ServiceProfilePreparation() }
+
+    func prepareLaunchProfile(device: MouseDevice, profileID: Int, retryFailed: Bool = false) {
+        guard profileMutationCount == 0, let token = launchProfile.begin(device: device, profileID: profileID, retryFailed: retryFailed) else { return }
+        Task { [client] in
+            defer { launchProfile.end(token: token) }
+            do {
+                let inventory = try await client.listOnboardProfiles(device: device)
+                guard inventory.activeProfileID == profileID, launchProfile.token == token else { return }
+                let profile = try await client.readOnboardProfile(device: device, profileID: profileID)
+                guard launchProfile.token == token else { return }
+                let named = await inventory.fillingMissingNames { slot in
+                    if slot == profileID { return profile.metadata }
+                    return try await client.readOnboardProfileMetadata(device: device, profileID: slot)
+                }
+                launchProfile.finish(token: token, inventory: named, profile: profile)
+            } catch { AppLog.debug("Service", "Launch profile unavailable device=\(device.id) error=\(error.localizedDescription)") }
+        }
+    }
+
+    func preparedLaunchProfile() -> ServiceProfilePreparation { launchProfile }
+
     func updateServiceSelectedDeviceID(_ deviceID: String?, acknowledgedSelections: [Int32: UUID]) async {
         guard OpenSnekProcessRole.current.isService else { return }
         guard serviceSelectedDeviceID != deviceID || self.acknowledgedSelections != acknowledgedSelections else { return }
@@ -874,7 +948,7 @@ final actor LocalBridgeBackend: HIDAccessRefreshControllingBackend, ApplyOptions
         publishSnapshotIfService()
     }
 
-    private func publishSnapshotIfService() {
+    func publishSnapshotIfService() {
         guard OpenSnekProcessRole.current.isService else { return }
         let liveIDs = Set(cachedDevices.map(\.id))
         publishStateUpdate(
