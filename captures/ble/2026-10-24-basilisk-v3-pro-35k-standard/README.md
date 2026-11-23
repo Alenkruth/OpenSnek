@@ -15,7 +15,7 @@ Contributor: https://github.com/alenkruth and Claude. The contributor owns the h
 | Area | Result | Evidence |
 |---|---|---|
 | DPI stages and DPI button | Pass | The active stage in the app followed each press through all five stages. `0B 81 00 00` and `0B 83 00 00` followed each press. The stored table `0B 84 02 00` reads `400/800/1600/5000/6400` after the contributor restored it. |
-| Battery and sleep timeout | Pass | Battery raw `a1` (0-255 scale) and sleep timeout `58 02` (600 s) show in the app. The timeout is one global setting (`05 84 00 00`). |
+| Battery and sleep timeout | Pass | Battery raw `a1` (0-255 scale) shows in the app. The mouse returns the sleep timeout `58 02` (600 s) for `05 84 00 00`, which is one global setting. The app does not read it while an onboard profile is active. It writes the value and reads it back. |
 | Static color and brightness | Pass | `10 83 02 <LED>` reads static green on LEDs `01`, `04` and `0A`. The stored brightness `10 85 02 <LED>` reads `4c`. The edits persisted after a power cycle with the app closed. |
 | Spectrum and Pulse | Pass, live only | Both effects render on the mouse. They reset on sleep, a power cycle or a profile change (see Findings). |
 | Buttons | Pass | Each button shows its mapping. A middle-click remap persisted. Media functions work. Slots `14` and `106` are read-only. |
