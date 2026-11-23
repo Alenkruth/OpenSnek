@@ -2,7 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.5.1-rc.2]
+
+### Added
+
+- Added Razer Basilisk Mobile support over Bluetooth, USB cable, and the HyperSpeed receiver. Remap all ten buttons, assign a DPI clutch, set independent X/Y sensitivity up to 18,000 DPI, adjust sleep timeout, and check battery and charging status. USB also supports polling-rate changes.
+- Choose from seven logo lighting effects and adjust brightness. The mouse saves the selected effect across power cycles. Bluetooth brightness resets at power-on.
 
 ### Added
 
